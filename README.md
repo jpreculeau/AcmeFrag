@@ -86,9 +86,9 @@ Le script propose trois options :
 ### Exemples de sortie
 
 ```
-⏳ [14:32:18] (1.4G ) Le_Seigneur_des_Anneaux_Extended.mkv : before:47 after:1 ✅
-⏳ [14:32:45] (850M ) Game_of_Thrones_S08E06_4K.mkv       : Déjà optimisé ✅
-⏳ [14:33:12] (2.1G ) Interstellar_IMAX.mkv                : before:23 after:2 ✅
+⏳ [14:32:18] (1.4G ) Le_Seigneur_des_balos.mkv           : before:47 after:1 ✅
+⏳ [14:32:45] (850M ) Game_de_Corniaux.mkv                : Déjà optimisé ✅
+⏳ [14:33:12] (2.1G ) Galadragtus et le serveur doré.mp4  : before:23 after:2 ✅
 ```
 
 ---
