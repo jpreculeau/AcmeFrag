@@ -1,10 +1,11 @@
 # 🎯 ACMEFRAG
 
-> **Défragmenteur intelligent XFS pour Raspberry Pi** - Parce que vos têtes de lecture méritent un traitement ACME !
+> **Défragmenteur intelligent pour partitions XFS** - Parce que vos têtes de lecture méritent un traitement ACME !
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Bash](https://img.shields.io/badge/bash-%23121011.svg?style=flat&logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
 [![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi-red)](https://www.raspberrypi.org/)
+[![Version](https://img.shields.io/badge/version-1.0.0-green.svg)]()
 
 ## 📖 Description
 
@@ -12,10 +13,10 @@
 
 ### 🎬 Cas d'usage idéal
 
-- **Streaming vidéo** depuis un NAS ou disque USB vers Freebox/Kodi/Plex
-- **Élimination des saccades** causées par la fragmentation
-- **Optimisation des disques durs** (HDD) connectés à un Raspberry Pi
-- **Maintenance préventive** de vos bibliothèques multimédia
+- **Bitorrent / Syncthing** Morcellement des fichiers important
+- **Élimination des saccades** causées par la fragmentation lors d’une lecture vidéos
+- **Optimisation des disques durs** (HDD) Des accès plus constant et contribue à éviter une fragmentation sur disques saturés
+- **Maintenance préventive** Améliore la durée de vie des HDD en évitant des seek constants
 
 ### ✨ Fonctionnalités principales
 
@@ -30,73 +31,57 @@
 
 ---
 
-## 🚀 Installation
+## 🚀 Installation rapide
 
 ### Prérequis
 
-- **OS** : Raspberry Pi OS (Debian/Ubuntu) ou toute distribution Linux
+- **OS** : toute distribution Linux
 - **Système de fichiers** : XFS (obligatoire)
 - **Paquets requis** : `xfsprogs`, `bc`, `coreutils`
 - **Droits** : `sudo` pour les opérations de défragmentation
 
-### Installation des dépendances
+### Installation en 3 étapes
 
 ```bash
-# Installer les outils XFS
-sudo apt update
-sudo apt install xfsprogs bc -y
-```
+# 1️⃣ Installer les dépendances
+sudo apt update && sudo apt install xfsprogs bc -y
 
-### Installation du script
-
-```bash
-# Cloner le dépôt
+# 2️⃣ Cloner et configurer
 git clone https://github.com/jpreculeau/acmefrag.git
 cd acmefrag
-
-# Rendre le script exécutable
 chmod +x acmefrag.sh
 
-# (Optionnel) Installer dans /usr/local/bin pour un accès global
+# 3️⃣ (Optionnel) Installation globale
 sudo cp acmefrag.sh /usr/local/bin/acmefrag
+acmefrag --help
 ```
 
 ---
 
 ## 💻 Utilisation
 
-### Syntaxe de base
+### Commandes essentielles
 
 ```bash
-./acmefrag.sh [CHEMIN_CIBLE] [OPTIONS]
-```
-
-### Exemples
-
-#### Mode interactif (par défaut)
-
-```bash
-# Analyse du dossier par défaut (/mnt/USB6To)
+# Analyse du dossier par défaut
 ./acmefrag.sh
 
-# Analyse d'un dossier spécifique
-./acmefrag.sh /mnt/mon-disque/Videos
-```
+# Analyse d'un dossier spécifique (mode interactif)
+./acmefrag.sh /mnt/mon-disque/
 
-Le script vous proposera ensuite :
-1. Défragmenter le TOP 10
-2. Défragmenter selon un seuil d'extents personnalisé
-3. Quitter
-
-#### Mode automatique (pour cron)
-
-```bash
-# Défragmente automatiquement le TOP 10 sans interaction
+# Mode automatique (pour cron)
 ./acmefrag.sh --auto
 
-# Avec un chemin personnalisé
-./acmefrag.sh /mnt/nas/Films --auto
+# Avec chemin personnalisé (pour cron)
+./acmefrag.sh /mnt/HDD/Films --auto
 ```
+
+### Menu interactif
+
+Le script propose trois options :
+1. **Défragmenter le TOP 10** des fichiers les plus fragmentés
+2. **Défragmenter selon un seuil personnalisé** (nombre d'extents)
+3. **Quitter**
 
 ### Exemples de sortie
 
@@ -110,17 +95,16 @@ Le script vous proposera ensuite :
 
 ## ⚙️ Configuration
 
-### Variables modifiables (début du script)
+### Variables modifiables
 
-| Variable | Valeur par défaut | Description |
-|----------|-------------------|-------------|
-| `DEFAULT_TARGET` | `/mnt/USB6To` | Dossier analysé si aucun argument fourni |
-| `INTEL_THRESHOLD_MO` | `4096` | Taille min d'un extent (en Mo) pour ignorer le fichier |
+| Variable | Par défaut | Description |
+|----------|-----------|-------------|
+| `DEFAULT_TARGET` | `/mnt/HDD` | Dossier analysé si aucun argument fourni |
+| `INTEL_THRESHOLD_MO` | `4096` | Taille min d'un extent (Mo) pour ignorer le fichier |
 | `OUTPUT_CSV` | `fragmentation_YYYY-MM-DD.csv` | Nom du rapport généré |
+| `REPORT_RETENTION_DAYS` | `30` | Jours de rétention des rapports |
 
-### Personnalisation
-
-Éditez le script pour modifier ces valeurs :
+### Personnaliser les paramètres
 
 ```bash
 nano acmefrag.sh
@@ -131,179 +115,173 @@ INTEL_THRESHOLD_MO=2048
 
 ---
 
-## 🔒 Conditions d'utilisation
+## 📋 Guide de démarrage
 
-### ⚠️ Avertissements importants
+### ✅ Avant de commencer
 
-1. **XFS uniquement** : Ce script ne fonctionne qu'avec le système de fichiers XFS
-2. **Droits sudo** : Nécessite des privilèges root pour `xfs_fsr` et `xfs_bmap`
-3. **Espace disque** : Assurez-vous d'avoir au moins 10% d'espace libre
-4. **Sauvegarde** : Bien que `xfs_fsr` soit sûr, faites une sauvegarde critique avant
-5. **Charge système** : La défragmentation est I/O intensive (évitez pendant le streaming actif)
+Vérifiez que votre disque utilise bien XFS :
 
-### 🎯 Bonnes pratiques
+```bash
+df -T /mnt/HDD
+# Résultat attendu : xfs dans la colonne Type
+```
 
-- ✅ Exécutez le script pendant les heures creuses (nuit)
-- ✅ Utilisez `--auto` dans une tâche cron hebdomadaire
-- ✅ Surveillez l'état de santé de l'espace libre
-- ❌ N'interrompez pas brutalement le script (Ctrl+C est géré proprement)
-- ❌ Ne lancez pas plusieurs instances simultanées
+### 🎯 Premier usage (5 minutes)
 
-### 📅 Automatisation avec cron
+```bash
+# 1. Lancer une analyse simple
+./acmefrag.sh
+
+# 2. Consulter le rapport généré
+cat fragmentation_$(date +%Y-%m-%d).csv
+
+# 3. Si nécessaire, lancer la défragmentation
+```
+
+### 🔄 Automatiser avec cron
 
 ```bash
 # Éditer le crontab
 crontab -e
 
-# Exemple : Tous les dimanches à 3h du matin
+# Ajouter cette ligne : chaque dimanche à 3h du matin
 0 3 * * 0 /usr/local/bin/acmefrag --auto >> /var/log/acmefrag.log 2>&1
 ```
 
 ---
 
-## 🧪 Tests et validation
+## 🔒 Sécurité et bonnes pratiques
 
-### Vérifier que votre disque est en XFS
+### ⚠️ Points importants
 
-```bash
-df -T /mnt/USB6To
-# Doit afficher "xfs" dans la colonne Type
+| ✓ À faire | ✗ À éviter |
+|-----------|-----------|
+| ✅ Exécuter pendant les heures creuses | ❌ Lancer pendant le streaming actif |
+| ✅ Faire une sauvegarde avant | ❌ Interrompre brutalement (Ctrl+C OK) |
+| ✅ Surveiller l'espace libre (>10%) | ❌ Lancer plusieurs instances |
+| ✅ Consulter les rapports CSV | ❌ Ignorer les avertissements |
+
+### Limites et contraintes
+
+1. **XFS uniquement** : Ne fonctionne qu'avec XFS
+2. **Droits root** : Nécessaire pour `xfs_fsr` et `xfs_bmap`
+3. **Espace disque** : Minimum 10% libre requis
+4. **I/O intensive** : Peut ralentir lors de défragmentation
+
+---
+
+## 📊 Rapports CSV
+
+### Format des données
+
+```csv
+Taille,Extents,Dossier,Nom,Chemin_Complet
+1.4G,47,/mnt/HDD/Films,BugsBunny.mkv,/mnt/HDD/Films/BugsBunny.mkv
 ```
 
-### Test de défragmentation manuelle
+| Colonne | Signification |
+|---------|---------------|
+| **Taille** | Format lisible (1.4G, 500M, etc.) |
+| **Extents** | Nombre de fragments (moins = mieux) |
+| **Dossier** | Répertoire parent |
+| **Nom** | Nom du fichier |
+| **Chemin_Complet** | Chemin absolu |
 
-```bash
-# Tester sur un seul fichier
-sudo xfs_fsr -v /mnt/USB6To/test_video.mkv
-```
+**Tri** : Par extents décroissants, puis taille décroissante
 
 ---
 
 ## 🐛 Dépannage
 
-### Le script s'arrête avec "n'est pas un point de montage"
+### "n'est pas un point de montage"
 
-**Cause** : Le disque n'est pas monté ou le chemin est incorrect
-
-**Solution** :
 ```bash
-# Vérifier les points de montage
+# Vérifier les disques XFS montés
 mount | grep xfs
 
-# Monter manuellement si nécessaire
-sudo mount /dev/sda1 /mnt/USB6To
+# Monter manuellement
+sudo mount /dev/sda1 /mnt/HDD
 ```
 
 ### "Système de fichiers détecté est (ext4)"
 
-**Cause** : Votre disque n'est pas formaté en XFS
+⚠️ **Votre disque n'est pas en XFS**
 
-**Solution** : Convertir en XFS (⚠️ DÉTRUIT LES DONNÉES)
 ```bash
-# ATTENTION : Sauvegardez d'abord !
+# Convertir en XFS (DÉTRUIT LES DONNÉES)
 sudo umount /dev/sda1
 sudo mkfs.xfs -f /dev/sda1
-sudo mount /dev/sda1 /mnt/USB6To
+sudo mount /dev/sda1 /mnt/HDD
 ```
 
-### "ÉCHEC (Espace insuffisant)"
+### "Espace insuffisant"
 
-**Cause** : Moins de 10% d'espace libre sur le disque
+```bash
+# Voir l'usage disque
+df -h /mnt/HDD
 
-**Solution** : Libérez de l'espace ou ignorez les gros fichiers en augmentant `INTEL_THRESHOLD_MO`
-
----
-
-## 📊 Comprendre les rapports CSV
-
-Les fichiers `fragmentation_YYYY-MM-DD.csv` contiennent :
-
-| Colonne | Description |
-|---------|-------------|
-| Taille | Taille du fichier (format humain : 1.4G, 500M) |
-| Extents | Nombre de morceaux (fragments) sur le disque |
-| Dossier | Chemin complet du répertoire parent |
-| Nom | Nom du fichier |
-| Chemin_Complet | Path absolu complet |
-
-**Tri** : Par défaut, trié par nombre d'extents (décroissant), puis taille (décroissant)
+# Solution : Augmenter le seuil intelligent
+INTEL_THRESHOLD_MO=8192  # Ignorer les gros fichiers
+```
 
 ---
 
 ## 🤝 Contribution
 
-Les contributions sont les bienvenues ! N'hésitez pas à :
+Vos contributes sont bienvenues !
 
-1. 🍴 Fork le projet
-2. 🌿 Créer une branche (`git checkout -b feature/amelioration`)
-3. 💾 Commit vos changements (`git commit -m 'Ajout fonctionnalité X'`)
-4. 📤 Push vers la branche (`git push origin feature/amelioration`)
-5. 🔃 Ouvrir une Pull Request
+```bash
+# 1. Fork le projet
+# 2. Créer une branche
+git checkout -b feature/votre-idee
 
-### Idées d'améliorations futures
+# 3. Commit et push
+git commit -m "Ajout : description"
+git push origin feature/votre-idee
 
-- [ ] Support EXT4 (en cours de développement)
-- [ ] Interface web de monitoring
-- [ ] Notifications par email/Telegram
-- [ ] Mode "dry-run" (simulation)
-- [ ] Statistiques graphiques (avant/après)
+# 4. Ouvrir une Pull Request
+```
+
+### Roadmap
+
+- [ ] Support EXT4
+- [ ] Affichage Dynamique des températures et données SMART
+- [ ] Fool Proof
+- [ ] Mode dry-run
+- [ ] Débug Analyse de l’espace libre
 
 ---
 
 ## 📜 Licence
 
-Ce projet est sous licence **GNU GPL v3** - voir le fichier [LICENSE](LICENSE) pour plus de détails.
+**GNU GPL v3** - [Voir LICENSE](LICENSE)
 
-### En résumé
-
-✅ Usage libre et gratuit  
-✅ Modification autorisée  
-✅ Distribution autorisée  
-✅ Usage commercial autorisé **SI le code reste open-source**  
-✅ Protection contre les brevets logiciels  
-❌ **Interdiction de fermer le code source** (copyleft)  
-❌ Toute modification doit rester sous GPL v3  
-❌ Aucune garantie fournie  
-
-### 🔒 Protection copyleft
-
-Toute version modifiée ou dérivée de ce logiciel **DOIT** :
-- Rester open-source sous GPL v3
-- Partager le code source complet
-- Mentionner les modifications apportées
-
-**Usage commercial** : Autorisé mais le code doit rester public et sous GPL v3.  
+✅ Usage libre | ✅ Modification | ✅ Distribution | ✅ Commercial*  
+*Code doit rester open-source
 
 ---
 
 ## 👤 Auteur
 
-**Votre nom** (stonehenge)
+**jpreculeau**
 
-- 🌍 Projet : [github.com/votre-username/acmefrag](https://github.com/votre-username/acmefrag)
-
----
-
-## 🙏 Remerciements
-
-- **XFS Developers** pour `xfs_fsr` et `xfs_bmap`
-- **Looney Tunes / Warner Bros** pour l'inspiration ACME 🎬
-- **La communauté Raspberry Pi** pour le support et les tests
+- 🔗 [GitHub](https://github.com/jpreculeau/acmefrag)
+- 📧 [Contactez-moi](https://github.com/jpreculeau)
 
 ---
 
-## 📚 Ressources additionnelles
+## 📚 Ressources
 
 - [Documentation XFS](https://xfs.wiki.kernel.org/)
-- [Guide xfs_fsr](https://man7.org/linux/man-pages/man8/xfs_fsr.8.html)
-- [Raspberry Pi OS Documentation](https://www.raspberrypi.org/documentation/)
+- [Manuel xfs_fsr](https://man7.org/linux/man-pages/man8/xfs_fsr.8.html)
+- [Raspberry Pi Docs](https://www.raspberrypi.org/documentation/)
 
 ---
 
 <div align="center">
 
-**⭐ Si ce projet vous aide, n'oubliez pas de lui donner une étoile ! ⭐**
+**⭐ Aimez ce projet ? Donnez-lui une étoile ! ⭐**
 
-Fait avec ❤️ pour la communauté Raspberry Pi et les amateurs de streaming fluide
+Fait avec ❤️ pour les débutants de la communauté Linux et la communauté Raspberry Pi
 
 </div>

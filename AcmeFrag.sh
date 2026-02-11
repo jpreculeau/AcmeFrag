@@ -27,19 +27,24 @@ execute_defrag() {
     local file_path="$1"
     local ext_count="$2"
     local file_size="$3"
-    local filename=$(basename "$file_path")
+    local filename
+    filename=$(basename "$file_path")
     
     # --- CALCUL DU RATIO (Taille moyenne d'un morceau) ---
     # On extrait le nombre (ex: 1.4) et l'unité (ex: G)
-    local size_val=$(echo "$file_size" | sed 's/[^0-9,.]//g' | tr ',' '.')
-    local unit=$(echo "$file_size" | grep -o -i '[G-M]')
+    local size_val
+    size_val=$(echo "$file_size" | sed 's/[^0-9,.]//g' | tr ',' '.')
+    local unit
+    unit=$(echo "$file_size" | grep -o -i '[G-M]')
     local size_mo=0
 
     # Conversion en Mo pour pouvoir faire un calcul mathématique
     if [[ "$unit" =~ [Gg] ]]; then
-        size_mo=$(echo "$size_val * 1024" | bc 2>/dev/null | cut -d'.' -f1)
+        size_mo=$(echo "$size_val * 1024" | bc 2>/dev/null)
+        size_mo=$(echo "$size_mo" | cut -d'.' -f1)
     elif [[ "$unit" =~ [Mm] ]]; then
-        size_mo=$(echo "$size_val" | bc 2>/dev/null | cut -d'.' -f1)
+        size_mo=$(echo "$size_val" | bc 2>/dev/null)
+        size_mo=$(echo "$size_mo" | cut -d'.' -f1)
     fi
 
     # FILTRE : Si Taille_Mo / Nb_Extents > 4096 Mo, on quitte la fonction sans rien faire
@@ -67,7 +72,8 @@ execute_defrag() {
 
     if echo "$output" | grep -q "DONE"; then
         # On supprime tout ce qui suit le mot "DONE" (le chemin complet du fichier)
-        local result=$(echo "$output" | grep "extents before" | sed 's/DONE.*//; s/extents //g; s/  */ /g')
+        local result
+        result=$(echo "$output" | grep "extents before" | sed 's/DONE.*//; s/extents //g; s/  */ /g')
         echo -e "\e[32m$result ✅\e[0m"
     elif echo "$output" | grep -q "no free space"; then
         echo -e "\e[31mÉCHEC (Espace insuffisant) ❌\e[0m"
@@ -93,7 +99,7 @@ process_csv_rows() {
 
     # On lit le CSV via le descripteur 3 pour ne pas interférer avec les commandes internes
     # sort -k2,2rn : trie par le nombre d'extents (colonne 2) du plus grand au plus petit
-    while IFS=';' read -u 3 -r size ext dir name fullpath; do
+    while IFS=';' read -u 3 -r size ext _ name fullpath; do
         # On s'arrête si on a atteint la limite fixée (si > 0)
         if [ "$limit" -gt 0 ] && [ "$count" -ge "$limit" ]; then break; fi
         
@@ -253,7 +259,7 @@ else
     case $choice in
         1)
             echo -e "\n=============================================================================="
-            echo "---   ⚙️ Traitement du TOP 10 \n"
+            echo -e "---   ⚙️ Traitement du TOP 10 (fichiers les plus fragmentés)"
             echo "=============================================================================="
             process_csv_rows 10 2 # Limite=10, Seuil=2
             ;;
@@ -292,7 +298,7 @@ stats_line=$(sudo xfs_db -r -c "freesp -s" "$DEV_PATH" 2>/dev/null | grep "free 
 # On vérifie si xfs_db a bien renvoyé une information exploitable
 if echo "$stats_line" | grep -q "average"; then
     # sed : extrait uniquement le nombre situé juste après le mot "average"
-    avg_blocks=$(echo "$stats_line" | sed 's/.*average \([0-9]*\).*/\1/')
+    avg_blocks=$( )
 
     # Calcul de la taille moyenne en Mo (approximation shell)
     # Sur XFS, 1 bloc standard = 4096 octets. 
