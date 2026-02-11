@@ -53,7 +53,6 @@ chmod +x acmefrag.sh
 
 # 3️⃣ (Optionnel) Installation globale
 sudo cp acmefrag.sh /usr/local/bin/acmefrag
-acmefrag --help
 ```
 
 ---
@@ -257,13 +256,13 @@ git push origin feature/votre-idee
 **GNU GPL v3** - [Voir LICENSE](LICENSE)
 
 ✅ Usage libre | ✅ Modification | ✅ Distribution | ✅ Commercial*  
-*Code doit rester open-source
+*accord préallable nécessaire et le code doit rester open-source
 
 ---
 
 ## 👤 Auteur
 
-**jpreculeau**
+**jphreculeau**
 
 - 🔗 [GitHub](https://github.com/jpreculeau/acmefrag)
 - 📧 [Contactez-moi](https://github.com/jpreculeau)
