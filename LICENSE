@@ -1,5 +1,5 @@
-GNU GENERAL PUBLIC LICENSE
-Version 3, 29 June 2007
+GNU GENERAL PUBLIC LICENSE WITH COMMERCIAL USE RESTRICTION
+Version 3, 29 June 2007 (Modified)
 
 Copyright (C) 2026 [Jean-Philippe Reculeau]
 
@@ -18,21 +18,37 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 ---
 
+COMMERCIAL USE CLAUSE (MANDATORY PAID LICENSE):
+Any commercial use, commercial distribution, incorporation into commercial 
+products, or deployment in a commercial setting requires a separate paid 
+commercial license. This includes but is not limited to:
+- Sale or rental of the software or modified versions
+- Use by commercial entities for business purposes
+- Integration into commercial software or services
+- Consulting services using this software
+- Any profit-generating use of the software
+
+To obtain a commercial license or for inquiries, please contact the copyright holder.
+
+Unauthorized commercial use is strictly prohibited.
+
+---
+
 FULL LICENSE TEXT:
 For the complete GPL v3 license text, see: https://www.gnu.org/licenses/gpl-3.0.txt
 
 SUMMARY OF KEY TERMS:
-- ✅ Freedom to use, study, share and improve the software
+- ✅ Freedom to use, study, share and improve the software (non-commercial)
 - ✅ Source code must remain open and available
 - ✅ Any modifications must also be licensed under GPL v3
-- ✅ Commercial use allowed BUT source code must be shared
-- ❌ Cannot be incorporated into proprietary software
-- ❌ Patent claims are automatically licensed
+- ❌ Commercial use is STRICTLY PROHIBITED without a paid license
+- ❌ Cannot be incorporated into proprietary software without paid license
+- ❌ Patent claims are automatically licensed (non-commercial only)
 
 ---
 
-LICENCE PUBLIQUE GÉNÉRALE GNU
-Version 3, 29 juin 2007
+LICENCE PUBLIQUE GÉNÉRALE GNU AVEC RESTRICTION D'UTILISATION COMMERCIALE
+Version 3, 29 juin 2007 (Modifiée)
 
 Copyright (C) 2026 [Jean-Philippe Reculeau]
 
@@ -51,15 +67,31 @@ avec ce programme. Si ce n'est pas le cas, voir <https://www.gnu.org/licenses/>.
 
 ---
 
+CLAUSE D'UTILISATION COMMERCIALE (LICENCE PAYANTE OBLIGATOIRE):
+Toute utilisation commerciale, distribution commerciale, intégration dans 
+des produits commerciaux ou déploiement dans un contexte commercial nécessite 
+une licence commerciale payante distincte. Cela inclut notamment :
+- Vente ou location du logiciel ou des versions modifiées
+- Utilisation par des entités commerciales à titre commercial
+- Intégration dans des logiciels ou services commerciaux
+- Services de conseil utilisant ce logiciel
+- Toute utilisation générant des bénéfices avec ce logiciel
+
+Pour obtenir une licence commerciale ou pour toute demande, veuillez contacter le détenteur des droits d'auteur.
+
+L'utilisation commerciale non autorisée est strictement interdite.
+
+---
+
 TEXTE COMPLET DE LA LICENCE :
 Pour le texte complet de la GPL v3, voir : https://www.gnu.org/licenses/gpl-3.0.txt
 
 RÉSUMÉ DES TERMES CLÉS :
-- ✅ Liberté d'utiliser, d'étudier, de partager et d'améliorer le logiciel
+- ✅ Liberté d'utiliser, d'étudier, de partager et d'améliorer le logiciel (non-commercial)
 - ✅ Le code source doit rester ouvert et disponible
 - ✅ Toute modification doit également être licenciée sous GPL v3
-- ✅ Utilisation commerciale autorisée MAIS le code source doit être partagé
-- ❌ Ne peut pas être intégré dans des logiciels propriétaires
-- ❌ Les revendications de brevet sont automatiquement licenciées
+- ❌ L'utilisation commerciale est STRICTEMENT INTERDITE sans licence payante
+- ❌ Ne peut pas être intégré dans des logiciels propriétaires sans licence payante
+- ❌ Les revendications de brevet sont automatiquement licenciées (utilisation non-commerciale uniquement)
 
 ---

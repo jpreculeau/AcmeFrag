@@ -1,327 +1,427 @@
 #!/bin/bash
-# Empêche le script de continuer si l'utilisateur appuie sur Ctrl+C
-# Affiche un message d'adieu avant de fermer proprement
-trap "echo -e '\n==============================================================================\n\n      Bye ! Bye !\n\n==============================================================================\n\n'; exit" INT
+################################################################################
+# ACMEFRAG - Défragmenteur Intelligent XFS + EXT4
+# Version Multi-Filesystems avec Protection SSD
+#
+# Licence / License: GNU General Public License v3
+# COMMERCIAL USE REQUIRES PAID LICENSE
+# Copyright (C) 2026 [Jean-Philippe Reculeau]
+# See LICENSE file for full details
+################################################################################
+
+set -euo pipefail
+IFS=$'\n\t'
+
+# ==============================================================================
+# GESTION DU SIGNAL (Ctrl+C)
+# ==============================================================================
+trap "echo -e '\n==============================================================================\n      Bye ! Bye !\n==============================================================================\n'; exit" INT
 
 # ==============================================================================
 # CONFIGURATION ET VARIABLES
 # ==============================================================================
 
-# Dossier cible par défaut si aucun n'est précisé au lancement
-DEFAULT_TARGET="/mnt/USB6To"
-# ${1:-...} récupère le 1er argument du script, sinon utilise le défaut
-TARGET_DIR="${1:-$DEFAULT_TARGET}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Création d'un nom de fichier CSV horodaté (ex: fragmentation_2026-27-08.csv)
-DATE_STR=$(date +%Y-%m-%d)
-OUTPUT_CSV="fragmentation_${DATE_STR}.csv"
-
-# SEUIL D'INTELLIGENCE : Si un morceau de fichier (extent) fait déjà plus de 4 Go (4096 Mo),
-# on considère qu'il est inutile de fatiguer le disque pour le défragmenter.
-INTEL_THRESHOLD_MO=4096
+# Note: toutes les variables de configuration (seuils, options par défaut,
+# noms de fichiers) sont centralisées dans `config.sh` et chargées via
+# `load_modules` (qui source `config.sh`). Ne pas redéfinir de variables
+# de configuration ici pour éviter les duplications.
 
 # ==============================================================================
-# FONCTION DE DÉFRAGMENTATION UNIFIÉE
+# CHARGEMENT DES MODULES
 # ==============================================================================
-execute_defrag() {
-    local file_path="$1"
-    local ext_count="$2"
-    local file_size="$3"
-    local filename
-    filename=$(basename "$file_path")
-    
-    # --- CALCUL DU RATIO (Taille moyenne d'un morceau) ---
-    # On extrait le nombre (ex: 1.4) et l'unité (ex: G)
-    local size_val
-    size_val=$(echo "$file_size" | sed 's/[^0-9,.]//g' | tr ',' '.')
-    local unit
-    unit=$(echo "$file_size" | grep -o -i '[G-M]')
-    local size_mo=0
 
-    # Conversion en Mo pour pouvoir faire un calcul mathématique
-    if [[ "$unit" =~ [Gg] ]]; then
-        size_mo=$(echo "$size_val * 1024" | bc 2>/dev/null)
-        size_mo=$(echo "$size_mo" | cut -d'.' -f1)
-    elif [[ "$unit" =~ [Mm] ]]; then
-        size_mo=$(echo "$size_val" | bc 2>/dev/null)
-        size_mo=$(echo "$size_mo" | cut -d'.' -f1)
-    fi
+load_modules() {
+    # Liste minimale des modules requis ; on source directement les noms de base.
+    local modules=(
+        "config.sh"
+        "security_checks.sh"
+        "security_monitor.sh"
+        "scan_functions.sh"
+        "defrag_functions.sh"
+        "display_functions.sh"
+        "maintenance_functions.sh"
+    )
 
-    # FILTRE : Si Taille_Mo / Nb_Extents > 4096 Mo, on quitte la fonction sans rien faire
-    if [ "$ext_count" -gt 0 ]; then
-        local ratio=$(( size_mo / ext_count ))
-        if [ "$ratio" -ge "$INTEL_THRESHOLD_MO" ]; then
-            # On peut décommenter la ligne suivante si on veut voir les fichiers ignorés
-            # printf "⏳ [%-8s] (%-5s) %-40s : \e[34mDéjà optimal (Blocs > 4Go)\e[0m\n" "$(date +%H:%M:%S)" "$file_size" "${filename:0:40}"
-            return 
+    for module in "${modules[@]}"; do
+        local candidate="${SCRIPT_DIR}/${module}"
+        if [ -f "$candidate" ]; then
+            # shellcheck source=/dev/null
+            source "$candidate"
+        else
+            echo "❌ Module manquant : $candidate"
+            exit 1
         fi
+    done
+}
+
+
+
+
+# ==============================================================================
+# MAIN
+# ==============================================================================
+
+main() {
+    clear
+
+    # --- Parsing des arguments & options ---
+    # Positionnels : $1 = target_dir (optionnel), $2 = mode ("--auto" ou autre)
+    TARGET_DIR="${1:-${DEFAULT_TARGET:-/mnt/USB6To}}"
+    MODE="${2:---auto}"
+
+    # Options booléennes (par défaut issues de config.sh)
+    DRY_RUN="${DRY_RUN:-false}"
+    FORCE_SSD="${FORCE_SSD:-false}"
+    for a in "$@"; do
+        case "$a" in
+            --dry-run)
+                DRY_RUN="true"
+                ;;
+            --force-ssd)
+                FORCE_SSD="true"
+                ;;
+        esac
+    done
+
+    export DRY_RUN FORCE_SSD
+
+    # ==================================================================================
+    # VÉRIFICATION DU RÉPERTOIRE CIBLE
+    # ==================================================================================
+    # Si l'utilisateur n'a pas changé le répertoire par défaut, le notifier et proposer
+    # une alternative (détection automatique ou saisie manuelle)
+    if [ "${TARGET_DIR}" = "${ORIGINAL_DEFAULT_TARGET}" ]; then
+        echo ""
+        echo "╔════════════════════════════════════════════════════════════════════════════╗"
+        echo "║                     ⚠️  ATTENTION                                           ║"
+        echo "╚════════════════════════════════════════════════════════════════════════════╝"
+        echo ""
+        echo "🔴 VOUS UTILISEZ LE RÉPERTOIRE PAR DÉFAUT : $ORIGINAL_DEFAULT_TARGET"
+        echo ""
+        echo "❗ Cela peut ne pas correspondre à votre configuration réelle."
+        echo "   Veuillez vérifier ou modifier le chemin cible."
+        echo ""
+        echo "🔀 Options :"
+        echo "   1. Sélectionner un disque détecté / Entrer un chemin personnalisé"
+        echo "   2. Continuer avec $ORIGINAL_DEFAULT_TARGET (NON RECOMMANDÉ)"
+        echo "   3. Annuler l'exécution"
+        echo ""
+        read -p "🔍 Votre choix [1-3] : " choice_target
+        
+        case "$choice_target" in
+            1)
+                echo ""
+                echo "🔄 Sélection d'un répertoire cible..."
+                if new_target=$(prompt_target_directory); then
+                    TARGET_DIR="$new_target"
+                    echo "✅ Répertoire cible défini à : $TARGET_DIR"
+                else
+                    echo "❌ Erreur lors de la sélection du répertoire."
+                    exit 1
+                fi
+                ;;
+            2)
+                echo ""
+                echo "⚠️  Poursuite avec le répertoire par défaut : $ORIGINAL_DEFAULT_TARGET"
+                ;;
+            3)
+                echo ""
+                echo "❌ Exécution annulée par l'utilisateur."
+                exit 1
+                ;;
+            *)
+                echo ""
+                echo "❌ Choix invalide."
+                exit 1
+                ;;
+        esac
+    fi
+    
+    cat << 'EOF'
+╔════════════════════════════════════════════════════════════════════════════╗
+║                    🚀 ACMEFRAG v2.0                                        ║
+║                 Défragmenteur Intelligent XFS + EXT4                      ║
+║                    Protection SSD + Surveillance 🌡️                         ║
+╚════════════════════════════════════════════════════════════════════════════╝
+EOF
+    
+    echo ""
+    echo "Target: $TARGET_DIR"
+    echo "CSV Output: $OUTPUT_CSV"
+    echo ""
+    # Valider la configuration chargée (prévenir seuils non-sensiques comme 0)
+    if declare -f validate_config &> /dev/null; then
+        validate_config || { echo "❌ Configuration invalide"; exit 1; }
+    fi
+    
+    # 1️⃣ VÉRIFICATIONS DE SÉCURITÉ
+    echo "1️⃣  Vérifications de sécurité..."
+    if ! run_security_checks "$TARGET_DIR"; then
+        echo "❌ Les vérifications de sécurité ont échoué."
+        exit 1
     fi
 
-    # --- AFFICHAGE FORMATÉ ---
-    # On limite le nom à 40 caractères pour que les colonnes soient toujours alignées
-    local display_name="${filename:0:40}"
-    [ ${#filename} -gt 40 ] && display_name="${display_name}..."
-    
-    # %-45s force une largeur de 45 caractères, aligné à gauche
-    printf "⏳ [%-8s] (%-5s) %-45s : " "$(date +%H:%M:%S)" "$file_size" "$display_name"
-    
-    # --- ACTION ---
-    # xfs_fsr -v : tente de défragmenter. On capture la sortie (stdout + stderr)
-    output=$(sudo xfs_fsr -v "$file_path" 2>&1)
-    exit_status=$?
-
-    if echo "$output" | grep -q "DONE"; then
-        # On supprime tout ce qui suit le mot "DONE" (le chemin complet du fichier)
-        local result
-        result=$(echo "$output" | grep "extents before" | sed 's/DONE.*//; s/extents //g; s/  */ /g')
-        echo -e "\e[32m$result ✅\e[0m"
-    elif echo "$output" | grep -q "no free space"; then
-        echo -e "\e[31mÉCHEC (Espace insuffisant) ❌\e[0m"
-    elif echo "$output" | grep -q "already fully"; then
-        echo -e "\e[34mDéjà optimisé ✅\e[0m"
+    # Démarrer la surveillance en temps réel (SMART / Températures)
+    if declare -f start_security_monitor &> /dev/null; then
+        start_security_monitor "$TARGET_DIR" || echo "⚠️ Impossible de démarrer le module de surveillance"
+        # S'assurer que le monitor est arrêté proprement à la fin
+        trap 'if declare -f stop_security_monitor >/dev/null 2>&1; then stop_security_monitor; fi; exit' EXIT
     else
-        echo "Ignoré (Gain insuffisant)"
+        echo "⚠️ Module de surveillance absent : actions en cours sans monitoring"
     fi
-
-    # Si le code de sortie > 128, c'est que l'utilisateur a fait Ctrl+C pendant xfs_fsr
-    if [ $exit_status -gt 128 ]; then exit 1; fi
-}
-
-# ==============================================================================
-# MOTEUR DE TRAITEMENT CSV
-# ==============================================================================
-# $1 = Limite (nombre de fichiers à traiter, 10 pour le TOP 10, 0 pour infini)
-# $2 = Seuil (minimum d'extents requis pour traiter le fichier)
-process_csv_rows() {
-    local limit=$1      # 10 pour le TOP 10, 0 pour tout
-    local threshold=$2  # Seuil minimum d'extents (ex: 5)
-    local count=0
-
-    # On lit le CSV via le descripteur 3 pour ne pas interférer avec les commandes internes
-    # sort -k2,2rn : trie par le nombre d'extents (colonne 2) du plus grand au plus petit
-    while IFS=';' read -u 3 -r size ext _ name fullpath; do
-        # On s'arrête si on a atteint la limite fixée (si > 0)
-        if [ "$limit" -gt 0 ] && [ "$count" -ge "$limit" ]; then break; fi
+    
+    # 2️⃣ NETTOYAGE DES ANCIENS RAPPORTS
+    echo ""
+    echo "2️⃣  Nettoyage des anciens rapports..."
+    clean_old_reports
+    
+    # 3️⃣ SCAN DU FILESYSTEM
+    echo ""
+    echo "3️⃣  Scan du système de fichiers..."
+    if ! scan_filesystem "$TARGET_DIR" "$OUTPUT_CSV"; then
+        echo "❌ Le scan a échoué."
+        exit 1
+    fi
+    
+    # 4️⃣ AFFICHAGE DU TOP 10
+    echo ""
+    echo "4️⃣  Résultats du scan..."
+    display_top_10 "$OUTPUT_CSV"
+    
+    # 5️⃣ DÉTERMINER LE MODE DE DÉFRAGMENTATION
+    echo ""
+    echo "5️⃣  Mode de défragmentation..."
+    
+    if [ "$MODE" = "--auto" ]; then
+        echo "🤖 Mode AUTOMATIQUE: défragmentation du TOP 10"
+        process_csv_rows "$DEFAULT_TOP_LIMIT" "$DEFAULT_MIN_EXTENTS" "$INTEL_THRESHOLD_MO" "$OUTPUT_CSV" "$TARGET_DIR" "${DRY_RUN:-false}"
+    else
+        echo "❓ Mode INTERACTIF"
         
-        # On ne traite que si le fichier a au moins X extents
-        if [ "$ext" -ge "$threshold" ]; then
-            execute_defrag "$fullpath" "$ext" "$size"
-            ((count++))
+        # Afficher le menu maintenance (si disponible)
+        if declare -f run_maintenance &> /dev/null; then
+            run_maintenance "$TARGET_DIR" "$OUTPUT_CSV"
+        else
+            # Fallback sinon
+            echo ""
+            echo "🔀 Sélectionnez une action :"
+            echo "   1. Défragmenter le TOP 10"
+            echo "   2. Défragmenter avec seuil personnalisé"
+            echo "   3. Quitter"
+            echo ""
+            read -p "🔍 Votre choix [1-3]: " choice
+            
+            case "$choice" in
+                1)
+                    echo ""
+                    echo "⚙️ Défragmentation du TOP 10 en cours..."
+                    echo ""
+                    process_csv_rows "$DEFAULT_TOP_LIMIT" "$DEFAULT_MIN_EXTENTS" "$INTEL_THRESHOLD_MO" "$OUTPUT_CSV" "$TARGET_DIR" "${DRY_RUN:-false}"
+                    ;;
+                2)
+                    echo ""
+                    read -p "🔍 Nombre minimum d'extents [2]: " threshold
+                    threshold=${threshold:-2}
+                    echo ""
+                    process_csv_rows 0 "$threshold" "$INTEL_THRESHOLD_MO" "$OUTPUT_CSV" "$TARGET_DIR" "${DRY_RUN:-false}"
+                    ;;
+                *)
+                    echo -e "\n✋ Opération annulée.\n"
+                    ;;
+            esac
         fi
-    done 3< <(tail -n +2 "$OUTPUT_CSV" | sort -t ';' -k2,2rn -k1,1rh)
+    fi
     
-    [ "$count" -eq 0 ] && echo "ℹ️ Aucun fichier ne nécessite de défragmentation."
+    # 6️⃣ AFFICHAGE DES STATS FINALES
+    echo ""
+    echo "6️⃣  Statistiques finales..."
+    display_free_space_status "$TARGET_DIR"
+    
+    echo ""
+    # Vérifier si arrêt automatique a eu lieu
+    if [ -f "/tmp/acmefrag_monitor_stop" ]; then
+        echo "⚠️  Exécution interrompue par le module de surveillance (seuil critique atteint)"
+        echo "✅ Tâche complétée (arrêtée automatiquement)"
+    else
+        echo "✅ Tâche complétée avec succès!"
+    fi
 }
 
-
 # ==============================================================================
-# VÉRIFICATIONS DE SÉCURITÉ (À placer impérativement avant le SCAN)
+# EXÉCUTION
 # ==============================================================================
 
-# 1. Vérifie si le chemin fourni existe physiquement sur le système.
-# Le test [ ! -d ... ] renvoie "vrai" si le répertoire n'existe PAS.
-if [ ! -d "$TARGET_DIR" ]; then
-    echo -e "\n   ❌ Erreur : Le dossier $TARGET_DIR n'existe pas."
+# ------------------------------------------------------------------------------
+# AIDE / HELP
+# Disponible en français (--aide) et en anglais (--help)
+# ------------------------------------------------------------------------------
+print_help() {
+                cat <<'EOF'
+╔════════════════════════════════════════════════════════════════════════════╗
+║           ACMEFRAG v2.0 - Défragmenteur Intelligent XFS + EXT4            ║
+║                   Avec surveillance SMART & température                    ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+UTILISATION (Français) :
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    ./AcmeFrag.sh [REPERTOIRE] [MODE] [OPTIONS]
+
+    REPERTOIRE       Chemin cible (par défaut: /mnt/USB6To depuis config.sh)
+    MODE             --auto (automatique) ou interactif (par défaut)
+
+    OPTIONS:
+      --aide, --help   Affiche cette aide
+      --dry-run        Simule sans modifier les fichiers
+      --force-ssd      Force défragmentation sur SSD (⚠️ déconseillé)
+      --interactive    Lance le menu principal interactif
+
+EXEMPLES :
+    ./AcmeFrag.sh                          # Mode interactif, répertoire par défaut
+    ./AcmeFrag.sh /mnt/data --auto         # Scan + défrag automatique
+    ./AcmeFrag.sh /mnt/data --dry-run      # Test sans modifications
+
+CONFIGURATION :
+    Éditez config.sh pour personnaliser :
+    • MONITOR_INTERVAL_SEC       : Fréquence des relevés (secondes)
+    • SMART_BAD_SECTOR_THRESHOLD : Seuil critique de secteurs défectueux
+    • DISK_TEMP_THRESHOLD_C      : Température critique du disque (°C)
+    • SYSTEM_TEMP_THRESHOLD_C    : Température critique du système (°C)
+    • AUTO_STOP_ON_ALERT         : Arrêt automatique en cas d'alerte (true/false)
+
+MODULES INTERNES :
+    security_checks.sh      → Vérifications (FS, SSD, outils, permissions)
+    security_monitor.sh     → Surveillance temps réel (SMART, température, arrêt auto)
+    scan_functions.sh       → Analyse de fragmentation
+    defrag_functions.sh     → Défragmentation avec monitoring
+    display_functions.sh    → Affichage et rapports CSV
+    maintenance_functions.sh → Menu interactif
+
+SURVEILLANCE EN TEMPS RÉEL :
+    🔒 Avant chaque fichier, le statut SMART et température s'affiche :
+       🔒 MONITOR: bad_sectors=42 bad_drift=+2 disk_temp=55C system_temp=68C alerts=none
+
+    Si un seuil est dépassé :
+       🚨 Arrêt automatique déclenché par le module de surveillance
+
+BONNES PRATIQUES :
+    ✅ Lancer en heures creuses (peu d'I/O)
+    ✅ Disposer d'au moins 10% d'espace libre
+    ✅ Surveiller d'abord avec --dry-run
+    ✅ Vérifier smartmontools et lm-sensors : sudo apt install smartmontools lm-sensors
+
+════════════════════════════════════════════════════════════════════════════
+
+USAGE (English) :
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    ./AcmeFrag.sh [DIRECTORY] [MODE] [OPTIONS]
+
+    DIRECTORY        Target path (default: /mnt/USB6To from config.sh)
+    MODE             --auto (automatic) or interactive (default)
+
+    OPTIONS:
+      --help, --aide   Show this help message
+      --dry-run        Simulate without modifying files
+      --force-ssd      Force defrag on SSD (⚠️ not recommended)
+      --interactive    Run main menu in interactive mode
+
+EXAMPLES :
+    ./AcmeFrag.sh                          # Interactive mode, default path
+    ./AcmeFrag.sh /mnt/data --auto         # Auto scan + defrag
+    ./AcmeFrag.sh /mnt/data --dry-run      # Test run without changes
+
+CONFIGURATION :
+    Edit config.sh to customize:
+    • MONITOR_INTERVAL_SEC       : Check frequency (seconds)
+    • SMART_BAD_SECTOR_THRESHOLD : Critical bad sector count
+    • DISK_TEMP_THRESHOLD_C      : Disk critical temperature (°C)
+    • SYSTEM_TEMP_THRESHOLD_C    : System critical temperature (°C)
+    • AUTO_STOP_ON_ALERT         : Auto-stop on alert (true/false)
+
+INTERNAL MODULES :
+    security_checks.sh      → Initial checks (FS, SSD, tools, permissions)
+    security_monitor.sh     → Real-time monitoring (SMART, temperature, auto-stop)
+    scan_functions.sh       → Fragmentation analysis
+    defrag_functions.sh     → Defragmentation with monitoring
+    display_functions.sh    → Display and CSV reports
+    maintenance_functions.sh → Interactive menu
+
+REAL-TIME MONITORING :
+    🔒 Before each file, SMART and temperature status displays:
+       🔒 MONITOR: bad_sectors=42 bad_drift=+2 disk_temp=55C system_temp=68C alerts=none
+
+    If a threshold is exceeded:
+       🚨 Automatic stop triggered by security monitor
+
+BEST PRACTICES :
+    ✅ Run during off-peak hours (low I/O)
+    ✅ Keep at least 10% free space
+    ✅ Test first with --dry-run
+    ✅ Install monitoring tools: sudo apt install smartmontools lm-sensors
+
+════════════════════════════════════════════════════════════════════════════
+EOF
+                exit 0
+}
+
+# Parsing robuste des options via `getopt` (supporte les long options)
+# - Traitement de --help/--aide en priorité
+# - Flags : --dry-run, --force-ssd, --auto, --interactive
+if ! TEMP_OPTS=$(getopt -o h --long help,aide,dry-run,force-ssd,auto,interactive -- "$@"); then
+    echo "❌ Erreur lors de l'analyse des options"
     exit 1
 fi
+eval set -- "$TEMP_OPTS"
 
-# 2. Vérifie si le dossier est un point de montage (un disque branché).
-# C'est crucial : cela évite d'écrire par erreur sur la carte SD de ton Pi 5
-# si le disque USB de 6 To s'est déconnecté.
-if ! mountpoint -q "$TARGET_DIR"; then
-    echo -e "\n   ❌ Erreur : $TARGET_DIR n'est pas un point de montage actif."
-    exit 1
-fi
+# Valeurs par défaut (peuvent être redéfinies par config.sh lors du source)
+DRY_RUN="${DRY_RUN:-false}"
+FORCE_SSD="${FORCE_SSD:-false}"
+MODE="${MODE:---auto}"
 
-# 3. Vérifie le type de système de fichiers.
-# xfs_fsr et xfs_bmap ne fonctionnent QUE sur du XFS.
-# stat -f -c %T récupère le nom du système de fichiers (ex: xfs, ext4, ntfs).
-fs_type=$(stat -f -c %T "$TARGET_DIR")
-if [ "$fs_type" != "xfs" ]; then
-    echo -e "\n   ❌ Erreur : Le système de fichiers détecté est ($fs_type)."
-    echo "   XFS est requis pour utiliser xfs_fsr."
-    exit 1
-fi
-
-# ==============================================================================
-# PHASE 1 : SCAN DU SYSTÈME DE FICHIERS
-# ==============================================================================
-
-echo -e "\n=============================================================================="
-echo "---   🔍 Analyse de la fragmentation XFS en cours sur : $TARGET_DIR"
-echo "---   Note : Cela peut prendre du temps selon le nombre de fichiers..."
-echo "=============================================================================="
-
-# On prépare le fichier CSV. L'entête permet de s'y retrouver si on l'ouvre dans Excel.
-# Le symbole '>' écrase le fichier s'il existait déjà.
-echo "Taille;Extents;Dossier;Nom;Chemin_Complet" > "$OUTPUT_CSV"
-
-# Utilisation de 'find -print0' : 
-# C'est la méthode la plus sûre pour gérer les noms de fichiers contenant des espaces,
-# des crochets ou des apostrophes (très fréquents dans les noms de vidéos).
-# Le caractère 'NULL' (\0) sert de séparateur universel.
-sudo find "$TARGET_DIR" -type f -print0 | while IFS= read -r -d '' file; do
-    
-    # xfs_bmap : interroge les métadonnées XFS pour voir comment le fichier est stocké.
-    # On compte le nombre de lignes renvoyées par la commande.
-    # 2>/dev/null : ignore les erreurs si un fichier est inaccessible ou verrouillé.
-    lines=$(sudo xfs_bmap "$file" 2>/dev/null | wc -l)
-    
-    # Logique XFS : xfs_bmap renvoie toujours au moins 1 ligne (le nom du fichier).
-    # S'il y a plus de 2 lignes, cela signifie que le fichier est en plusieurs morceaux (extents).
-    if [ "$lines" -gt 2 ]; then
-        # On calcule le nombre réel de morceaux (Lignes totales - 1 ligne d'entête)
-        real_extents=$((lines - 1))
-        
-        # du -h : récupère la taille "humaine" (ex: 1.4G, 500M)
-        # cut -f1 : on ne garde que la première colonne (la taille)
-        size=$(du -h "$file" | cut -f1)
-        
-        # dirname/basename : séparent le chemin d'accès du nom du fichier
-        dirname=$(dirname "$file")
-        basename=$(basename "$file")
-        
-        # On écrit tout dans le CSV en utilisant le point-virgule comme séparateur.
-        # '>>' signifie qu'on ajoute à la fin du fichier sans effacer le reste.
-        echo "$size;$real_extents;$dirname;$basename;$file" >> "$OUTPUT_CSV"
-        
-        # Petit point visuel pour montrer que le script travaille et n'est pas planté.
-        echo -n "."        
-    fi
-done
-
-echo -e "\n\n✅ Rapport généré : $OUTPUT_CSV"
-
-# ==============================================================================
-# Phase 2 : NETTOYAGE DES ANCIENS RAPPORTS (ROTATION)
-# ==============================================================================
-# Ce module cherche les fichiers .csv créés par ce script et supprime ceux 
-# datant de plus de 30 jours pour éviter d'encombrer ton système.
-
-echo "---  Nettoyage des anciens rapports (plus de 30 jours) ---"
-
-# -name "fragmentation_*.csv" : cible uniquement les rapports
-# -maxdepth 1 : Oblige find à ne chercher QUE dans le dossier actuel, sans entrer dans les sous-dossiers
-# -mtime +30 : sélectionne les fichiers modifiés il y a plus de 30 jours
-# -delete : les supprime automatiquement
-find . -maxdepth 1 -name "fragmentation_*.csv" -type f -mtime +30 -delete
-
-# ==============================================================================
-# PHASE 3 : AFFICHAGE DES RÉSULTATS (TOP 10)
-# ==============================================================================
-
-echo -e "\n=============================================================================="
-echo "---   🏆 TOP 10 DES FICHIERS LES PLUS FRAGMENTÉS "
-echo "---   (Trié par : Nb Extents, puis par Taille de fichier)"
-echo "=============================================================================="
-
-# printf : permet de créer des colonnes parfaitement alignées à l'écran.
-# %-10s signifie "chaîne de 10 caractères alignée à gauche".
-printf "%-10s   %-10s   %-s\n" "EXTENTS" "TAILLE" "NOM DU FICHIER"
-echo "------------------------------------------------------------------------------"
-
-# tail -n +2 : saute la première ligne (l'entête du CSV)
-# sort : 
-#   -t ';' : utilise le point-virgule comme séparateur
-#   -k2,2rn : trie la colonne 2 (extents) en numérique (n) inversé (r)
-#   -k1,1rh : trie la colonne 1 (taille) en format humain (h) inversé (r)
-# head -n 10 : ne garde que les 10 premières lignes du résultat trié
-# awk : formate le résultat final pour l'affichage avec des barres verticales '|'
-tail -n +2 "$OUTPUT_CSV" | sort -t ';' -k2,2rn -k1,1rh | head -n 10 | awk -F';' '{printf "%-10s | %-10s | %-s\n", $2, $1, $4}'
-
-echo -e "\n=============================================================================="
-
-# ==============================================================================
-# PHASE 4 : MAINTENANCE (AUTO OU MANUELLE)
-# ==============================================================================
-
-# On calcule le maximum pour l'affichage du menu
-max_found=$(tail -n +2 "$OUTPUT_CSV" | cut -d';' -f2 | sort -rn | head -n 1)
-[ -z "$max_found" ] && max_found=0
-
-if [ ! -t 0 ] || [[ "$*" == *"--auto"* ]]; then
-    echo -e "\n Mode automatique : Défragmentation du TOP 10."
-    process_csv_rows 10 2 # Limite=10, Seuil=2
-else
-    # MODE INTERACTIF
-    echo -e "\n=============================================================================="
-    echo "---   🛠️ OPTIONS DE MAINTENANCE (Max actuel : $max_found extents)"
-    echo "=============================================================================="
-    echo ""
-    echo "     1) Défragmenter le TOP 10"
-    echo "     2) Défragmenter selon un SEUIL d'extents"
-    echo "     q) Quitter"
-    echo ""
-    echo "------------------------------------------------------------------------------"
-    echo ""
-    read -p "      Votre choix : " choice
-
-    case $choice in
-        1)
-            echo -e "\n=============================================================================="
-            echo -e "---   ⚙️ Traitement du TOP 10 (fichiers les plus fragmentés)"
-            echo "=============================================================================="
-            process_csv_rows 10 2 # Limite=10, Seuil=2
+positional=()
+while true; do
+    case "$1" in
+        -h|--help|--aide)
+            print_help
             ;;
-        2)
-            read -p "      Seuil minimum d'extents (ex: 5) : " threshold
-            if [[ "$threshold" =~ ^[0-9]+$ ]] && [ "$threshold" -ge 2 ]; then
-                echo -e "\n---   ⚙️ Traitement des fichiers >= $threshold extents\n"
-                process_csv_rows 0 "$threshold" # Limite=0 (tout), Seuil=threshold
-            else
-                echo -e  "\n   ❌ Seuil invalide."
-            fi
+        --dry-run)
+            DRY_RUN="true"; shift
+            ;;
+        --force-ssd)
+            FORCE_SSD="true"; shift
+            ;;
+        --auto)
+            MODE="--auto"; shift
+            ;;
+        --interactive)
+            MODE="--interactive"; shift
+            ;;
+        --)
+            shift; break
             ;;
         *)
-            echo -e  "\n   Pas de défragmentation effectuée."
+            break
             ;;
     esac
-fi
+done
 
-# ==============================================================================
-# PHASE 5 : BILAN DE L'ESPACE LIBRE (DYNAMIQUE)
-# ==============================================================================
+# Récupérer les arguments positionnels restants
+while [ "$#" -gt 0 ]; do
+    positional+=("$1")
+    shift
+done
 
-echo -e "\n=============================================================================="
-echo "---   📊 ÉTAT DE SANTÉ DE L'ESPACE LIBRE"
-echo "=============================================================================="
-echo -e "\n\n---   ⏳ Analyse des métadonnées (patience…)"
+# Charger les modules (config.sh va définir DEFAULT_TARGET etc.)
+load_modules
 
-# Récupération du nom du disque (ex: /dev/sda1) associé au point de montage
-DEV_PATH=$(df "$TARGET_DIR" | tail -1 | awk '{print $1}')
+# Déterminer TARGET_DIR et MODE en s'appuyant sur les valeurs de config
+TARGET_DIR="${positional[0]:-${DEFAULT_TARGET:-/mnt/USB6To}}"
+MODE="${positional[1]:-${MODE:---auto}}"
 
-# xfs_db -r -c "freesp -s" : interroge la structure interne du disque.
-# -r (read-only) est indispensable pour ne pas corrompre le disque pendant l'analyse.
-# freesp -s donne un résumé global de l'espace libre.
-stats_line=$(sudo xfs_db -r -c "freesp -s" "$DEV_PATH" 2>/dev/null | grep "free blocks")
+export DRY_RUN FORCE_SSD TARGET_DIR MODE
 
-# On vérifie si xfs_db a bien renvoyé une information exploitable
-if echo "$stats_line" | grep -q "average"; then
-    # sed : extrait uniquement le nombre situé juste après le mot "average"
-    avg_blocks=$( )
-
-    # Calcul de la taille moyenne en Mo (approximation shell)
-    # Sur XFS, 1 bloc standard = 4096 octets. 
-    # (Nombre de blocs * 4 / 1024) nous donne la taille en Mo.
-    avg_size_mo=$((avg_blocks * 4 / 1024))
-
-    echo -e "\n   Sur le disque $DEV_PATH :"
-    echo "   > Taille moyenne des zones vides : ~ $avg_size_mo Mo"
-
-    
-    # Interprétation du résultat :
-    # Si la zone moyenne est trop petite, xfs_fsr ne pourra pas déplacer les gros fichiers.
-    if [ "$avg_size_mo" -gt 500 ]; then
-        echo -e "\n   Excellent ✅ (Espace sain et continu)"
-    elif [ "$avg_size_mo" -gt 100 ]; then
-        echo "Correct ⚠️ (Fragmentation légère de l'espace libre)"
-    else
-        echo -e "\n   Critique ❌ (Espace très haché : défragmentation conseillée)"
-    fi
-else
-    echo -e "\n   ⚠️ Info : Analyse impossible (le disque est peut-être verrouillé ou trop occupé)."
-fi
-
-echo -e "\n =============================================================================="
-echo "      ✅ Maintenance terminée."
-echo "=============================================================================="
+# Appel principal
+main "$TARGET_DIR" "$MODE"
