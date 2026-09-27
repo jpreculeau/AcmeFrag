@@ -28,7 +28,7 @@ version monolithique utilisée en production (v1.x d'avril 2026), mise aux norme
 - Journal de session persistant, compteurs et résumé (repris de la v1.x).
 - Défragmentation globale `xfs_fsr` bornée dans le temps (reprise de la v1.x).
 - Surcharges `local.conf` / `/etc/acmefrag.conf` : `config.sh` n'est plus édité à la main.
-- Tests unitaires, tests d'intégration sur images loop, `make lint test`.
+- Tests unitaires, tests d'intégration sur images loop, `make lint test`, CI GitHub Actions (shellcheck + tests unitaires + intégration EXT4/XFS sur images loop).
 
 ### Modifié
 - Un seul scanner (`filefrag` par lots) pour XFS et EXT4 ; tailles en octets (plus de `bc` ni de conversion « 2,4G »).
