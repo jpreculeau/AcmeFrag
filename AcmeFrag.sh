@@ -206,11 +206,12 @@ main() {
     target=$(resolve_target "$mode")
 
     mkdir -p -- "$REPORT_DIR"
-    acquire_lock
     csv="${REPORT_DIR}/fragmentation_$(date +%Y-%m-%d).csv"
     logf="${REPORT_DIR}/acmefrag_$(date +%Y-%m-%d).log"
-    # Journal persistant : tout est dupliqué dans le fichier, rien n'est caché à l'écran
+    # Journal persistant : tout est dupliqué dans le fichier, rien n'est caché à l'écran.
+    # `tee` est lancé AVANT le verrou pour ne pas en hériter (il survit un instant au script).
     exec > >(tee -a "$logf") 2>&1
+    acquire_lock
 
     trap cleanup EXIT
     trap on_interrupt INT TERM

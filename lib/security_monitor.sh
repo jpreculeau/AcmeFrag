@@ -46,6 +46,8 @@ _system_temp() {
 _monitor_loop() {
     local dev="$1" args="$2" smart="$3" parent="$4"
     local initial_bad="NA" bad temp sys drift alerts
+    # Ne pas hériter du verrou : un `sleep` orphelin le garderait après la fin du script
+    if [[ -n "${LOCK_FD:-}" ]]; then exec {LOCK_FD}>&-; fi
     [[ "$smart" == true ]] && read -r initial_bad _ < <(_smart_read "$dev" "$args")
     while kill -0 "$parent" 2>/dev/null; do
         bad=NA temp=NA drift=0 alerts=""

@@ -78,6 +78,12 @@ test_fs() {
     check "$fs : menu interactif -> code 0" test "$rc" -eq 0
     check "$fs : menu affiché et dry-run basculé" grep -q "Dry-run ACTIVÉ" "$WORK/menu.log"
 
+    # Deux lancements successifs AVEC surveillance : le verrou doit être libéré à la sortie
+    rc=0
+    env -u TERM REPORT_DIR="$WORK/reports" MONITOR_INTERVAL_SEC=30 "$ACME" "$MNT" --dry-run --auto --force-ssd </dev/null >/dev/null 2>&1 || rc=$?
+    env -u TERM REPORT_DIR="$WORK/reports" MONITOR_INTERVAL_SEC=30 "$ACME" "$MNT" --dry-run --auto --force-ssd </dev/null >/dev/null 2>&1 || rc=$?
+    check "$fs : verrou libéré entre deux lancements surveillés" test "$rc" -ne 4
+
     # Verrou : une seconde instance doit refuser (code 4)
     exec {fd}> "$WORK/reports/.acmefrag.lock"; flock "$fd"
     rc=0; run_acme "$MNT" --dry-run --no-monitor --force-ssd || rc=$?
