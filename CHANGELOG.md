@@ -38,5 +38,6 @@ version monolithique utilisée en production (v1.x d'avril 2026), mise aux norme
 - Écran rafraîchi (`clear`) remplacé par une ligne de surveillance par fichier : lisible dans les journaux.
 
 ### Supprimé
+- Clause « usage commercial payant » : incompatible avec la GPL (§7, §10). La licence est désormais la GPL v3 officielle, sans restriction ajoutée (`GPL-3.0-or-later`).
 - `migrate_acmefrag.sh` (migration v1→v2 terminée), `MANIFEST.md` et `REFACTORING_NOTES.md` (obsolètes, encodage cassé) — remplacés par ce fichier.
 - Dépendance à `bc`.

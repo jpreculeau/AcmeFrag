@@ -4,7 +4,7 @@
 # Journalisation, codes de sortie, détection FS / disque, mesure des extents.
 # Source unique : aucune de ces fonctions ne doit être redéfinie ailleurs.
 #
-# Licence / License: GNU General Public License v3
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Jean-Philippe Reculeau — voir LICENSE
 ################################################################################
 

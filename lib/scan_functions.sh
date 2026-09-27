@@ -8,7 +8,7 @@
 # Rapport CSV (séparateur TAB, trié par extents puis taille décroissants) :
 #   Octets<TAB>Extents<TAB>Taille<TAB>Chemin
 #
-# Licence / License: GNU General Public License v3
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Jean-Philippe Reculeau — voir LICENSE
 ################################################################################
 

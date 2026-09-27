@@ -4,7 +4,7 @@
 # Analyse la fragmentation fichier par fichier, ne traite que ce qui gêne vraiment
 # la lecture, protège les SSD et surveille le disque (SMART / températures).
 #
-# Licence / License: GNU General Public License v3
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Jean-Philippe Reculeau — voir LICENSE
 ################################################################################
 

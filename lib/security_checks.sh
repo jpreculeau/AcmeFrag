@@ -3,7 +3,7 @@
 # VÉRIFICATIONS DE SÉCURITÉ - AcmeFrag (XFS + EXT4 + protection SSD)
 # Chaque check renvoie 0 (OK) ou 1 (refus) et explique pourquoi.
 #
-# Licence / License: GNU General Public License v3
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Jean-Philippe Reculeau — voir LICENSE
 ################################################################################
 

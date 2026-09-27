@@ -2,7 +2,7 @@
 
 > **Défragmenteur intelligent pour partitions XFS et EXT4** — parce que vos têtes de lecture méritent un traitement ACME !
 
-[![License: GPL v3 + Commercial](https://img.shields.io/badge/License-GPLv3%2BCommercial-blue.svg)](LICENSE)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Bash](https://img.shields.io/badge/bash-%23121011.svg?style=flat&logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
 [![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi-red)](https://www.raspberrypi.org/)
 [![Version](https://img.shields.io/badge/version-3.0.0-green.svg)](CHANGELOG.md)
@@ -175,12 +175,9 @@ sudo make it       # tests d'intégration (images loop, aucun disque réel touch
 
 ## 📜 Licence
 
-Ce projet est licencié sous la **GNU General Public License v3 (GPL v3)** avec la restriction suivante :
+Copyright (C) 2026 Jean-Philippe Reculeau.
 
-- ✅ **Usage personnel et non-commercial** : libre d'utilisation, modification et distribution
-- ❌ **Usage commercial** : nécessite une **licence commerciale payante**
-
-Voir [LICENSE](LICENSE).
+Ce programme est un logiciel libre, distribué sous la **GNU General Public License v3** ou toute version ultérieure (`GPL-3.0-or-later`) : vous pouvez l'utiliser, y compris commercialement, le modifier et le redistribuer, à condition que toute version redistribuée reste sous GPL avec son code source. Il est fourni **sans aucune garantie**. Texte complet : [LICENSE](LICENSE).
 
 ## 👤 Auteur
 

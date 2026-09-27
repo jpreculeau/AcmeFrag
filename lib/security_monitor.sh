@@ -5,7 +5,7 @@
 # température système, et demande l'arrêt si un seuil est dépassé.
 # Fichiers d'état dans un dossier privé (mktemp) : pas de chemins /tmp prévisibles.
 #
-# Licence / License: GNU General Public License v3
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Jean-Philippe Reculeau — voir LICENSE
 ################################################################################
 

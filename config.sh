@@ -8,7 +8,7 @@
 # en y définissant les variables à surcharger (ex: DEFAULT_TARGET=/mnt/HDD).
 # Priorité : options CLI > local.conf > /etc/acmefrag.conf > variables d'env > défauts ci-dessous.
 #
-# Licence / License: GNU General Public License v3
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Jean-Philippe Reculeau — voir LICENSE
 ################################################################################
 

@@ -4,7 +4,7 @@
 # Le résultat est mesuré (extents avant/après via filefrag) plutôt que déduit du
 # texte des outils : même logique et même affichage pour les deux FS.
 #
-# Licence / License: GNU General Public License v3
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Jean-Philippe Reculeau — voir LICENSE
 ################################################################################
 
