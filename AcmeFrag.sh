@@ -154,6 +154,10 @@ apply_qos() {
 # ==============================================================================
 cleanup() {
     stop_security_monitor 2>/dev/null || true
+    # Lancé via sudo : rendre les rapports à l'utilisateur (pas de fichiers root dans son dossier)
+    if [[ -n "${SUDO_UID:-}" && -d "${REPORT_DIR:-}" ]]; then
+        chown -R "${SUDO_UID}:${SUDO_GID:-$SUDO_UID}" -- "$REPORT_DIR" 2>/dev/null || true
+    fi
 }
 
 on_interrupt() {
