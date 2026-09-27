@@ -1,49 +1,13 @@
-# IDE
+# Rapports et journaux générés
+reports/
+*.csv
+*.log
+# Réglages machine
+local.conf
+# Sauvegardes / temporaires
+*.bak
+*.tmp
+*.swp
 .idea/
 .vscode/
-*.swp
-*.swo
-
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-venv/
-.venv/
-*.egg-info/
-dist/
-build/
-
-# Bash
-*.bak
-
-# Environnement & Secrets
-.env
-.env.local
-*.key
-*.pem
-*credentials*
-
-# OS
 .DS_Store
-Thumbs.db
-
-# Logs
-*.log
-logs/
-
-# Temporaires
-*.tmp
-*.temp
-*.cache
-
-# Données
-*.csv
-*.json
-*.db
-*.sqlite
-
-# Config sensible (mais garde config/ si besoin)
-# config/secrets.conf

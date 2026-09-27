@@ -1,0 +1,4 @@
+external-sources=true
+source-path=SCRIPTDIR
+# Variables globales partagées entre modules sourcés : faux positifs
+disable=SC2034

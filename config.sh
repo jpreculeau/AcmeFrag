@@ -1,212 +1,108 @@
-#!/bin/bash
+# shellcheck shell=bash
 ################################################################################
-# CONFIGURATION CENTRALISÉE - AcmeFrag (Multi-FS: XFS + EXT4)
-# Tous les paramètres du programme sont définis ici
+# CONFIGURATION - AcmeFrag (XFS + EXT4)
+#
+# Ne modifiez pas ce fichier pour vos réglages machine : créez plutôt
+#   /etc/acmefrag.conf        (réglages système)
+#   <dossier AcmeFrag>/local.conf  (réglages locaux, ignoré par git)
+# en y définissant les variables à surcharger (ex: DEFAULT_TARGET=/mnt/HDD).
+# Priorité : options CLI > local.conf > /etc/acmefrag.conf > variables d'env > défauts ci-dessous.
 #
 # Licence / License: GNU General Public License v3
-# COMMERCIAL USE REQUIRES PAID LICENSE
-# Copyright (C) 2026 [Jean-Philippe Reculeau]
-# See LICENSE file for full details
+# Copyright (C) 2026 Jean-Philippe Reculeau — voir LICENSE
 ################################################################################
 
-# --- RÉPERTOIRE CIBLE ---
-# Dossier cible par défaut si aucun n'est précisé au lancement
-# Cette valeur sera modifiée par detect_available_disks() au chargement
-DEFAULT_TARGET="/mnt/HDD"
-ORIGINAL_DEFAULT_TARGET="/mnt/HDD"  # Conserve la valeur de base pour comparaison
+# --- Surcharges optionnelles (chargées AVANT les défauts) --------------------
+for _conf in /etc/acmefrag.conf "${ACMEFRAG_HOME}/local.conf"; do
+    # shellcheck source=/dev/null
+    [[ -r "$_conf" ]] && source "$_conf"
+done
+unset _conf
 
-# --- SYSTÈMES DE FICHIERS SUPPORTÉS ---
-SUPPORTED_FS_TYPES="xfs ext4"  # Systèmes de fichiers acceptés
+# --- Cible -------------------------------------------------------------------
+: "${DEFAULT_TARGET:=/mnt/HDD}"     # dossier analysé si aucun n'est donné
+: "${ALLOW_ROOT_FS:=false}"            # autoriser le FS racine (/) — déconseillé
 
-# --- SEUILS DE DÉFRAGMENTATION ---
-# SEUIL D'INTELLIGENCE : Si un morceau (extent) fait déjà plus de 4 Go,
-# inutile de fatiguer le disque pour le défragmenter
-INTEL_THRESHOLD_MO=4096
+# --- Seuils de défragmentation -------------------------------------------------
+# Seuil d'intelligence : si la taille moyenne d'un extent (Mo) dépasse ce seuil,
+# le fichier est déjà « assez contigu » pour une lecture fluide : on l'ignore.
+# 0 = filtre désactivé (tout est traité).
+: "${INTEL_THRESHOLD_MO:=4096}"
+: "${DEFAULT_MIN_EXTENTS:=2}"          # nb minimum d'extents pour traiter un fichier
+: "${DEFAULT_TOP_LIMIT:=10}"           # nb de fichiers éligibles traités en mode auto
+# Fichiers modifiés depuis moins de N minutes ignorés (téléchargement / sync en cours)
+: "${MIN_FILE_AGE_MIN:=60}"
+# Durée max de la défragmentation globale xfs_fsr (secondes)
+: "${GLOBAL_FSR_TIMEOUT_SEC:=10800}"
 
-# Seuil minimum d'extents pour traiter un fichier (défaut: 2)
-DEFAULT_MIN_EXTENTS=2
+# Motifs exclus du scan (fichiers temporaires de qBittorrent, Syncthing, navigateurs)
+if [[ -z "${SCAN_EXCLUDES+x}" ]]; then
+    SCAN_EXCLUDES=('*.tmp' '*.part' '*.parts' '*.!qB' '.syncthing.*' '*.crdownload')
+fi
 
-# Limite pour le TOP 10 (nombre de fichiers à traiter)
-DEFAULT_TOP_LIMIT=10
+# --- Rapports ------------------------------------------------------------------
+: "${REPORT_DIR:=${ACMEFRAG_HOME}/reports}"   # CSV + journaux
+: "${REPORT_MAX_AGE_DAYS:=30}"
 
-# --- FICHIERS DE SORTIE ---
-# Création d'un nom de fichier CSV horodaté (ex: fragmentation_2026-02-19.csv)
-DATE_STR=$(date +%Y-%m-%d)
-OUTPUT_CSV="fragmentation_${DATE_STR}.csv"
+# --- Protection SSD ------------------------------------------------------------
+# Les SSD ne doivent PAS être défragmentés (usure inutile, aucun gain).
+: "${ALLOW_SSD_DEFRAG:=false}"
 
-# --- NETTOYAGE DES FICHIERS ANCIENS ---
-# Nombre de jours avant suppression des anciens rapports
-REPORT_MAX_AGE_DAYS=30
+# --- Qualité de service --------------------------------------------------------
+# La défragmentation est une tâche de fond : elle ne doit jamais gêner la lecture
+# vidéo ni les sessions interactives. Par défaut : CPU nice 19 + E/S classe « idle »
+# (le disque n'est utilisé que lorsque personne d'autre ne s'en sert — effectif avec
+# les ordonnanceurs BFQ/CFQ).
+: "${QOS_ENABLE:=true}"
+: "${QOS_NICE:=19}"
+: "${QOS_IO_CLASS:=3}"                 # 3 = idle, 2 = best-effort
 
-# --- FORMATS D'AFFICHAGE ---
-# Largeur maximale pour le nom de fichier dans les logs
-MAX_FILENAME_DISPLAY=45
+# --- Surveillance temps réel (SMART + températures) ----------------------------
+: "${MONITOR_ENABLE:=true}"
+: "${MONITOR_INTERVAL_SEC:=30}"        # un relevé SMART coûte une requête au pont USB
+# Secteurs réalloués (attribut SMART 5) — repères :
+#   0-5 excellent | 6-20 usure normale | 21-50 surveiller | 51-100 critique | >100 danger
+#   NAS critique : 20 / 3   — Multimédia perso : 50 / 5   — Fin de vie : 100 / 10
+: "${SMART_BAD_SECTOR_THRESHOLD:=50}"
+: "${SMART_BAD_SECTOR_DRIFT_THRESHOLD:=5}"
+: "${DISK_TEMP_THRESHOLD_C:=60}"
+: "${SYSTEM_TEMP_THRESHOLD_C:=85}"
+: "${AUTO_STOP_ON_ALERT:=true}"
 
-# --- PROTECTION SSD ---
-# Les SSDs ne doivent PAS être défragmentés (usure, "wear leveling")
-ALLOW_SSD_DEFRAG="false"  # Ne JAMAIS changer à true sans comprendre les risques!
+# --- Options d'exécution (modifiées par la ligne de commande) -------------------
+: "${DRY_RUN:=false}"
+: "${FORCE_SSD:=false}"
 
-# --- OPTIONS D'EXÉCUTION (par défaut) ---
-# Ces variables peuvent être modifiées à la volée par le script principal via
-# des arguments (ex: --dry-run, --force-ssd). Les valeurs par défaut sont
-# définies ici pour centraliser la configuration.
-DRY_RUN="false"
-FORCE_SSD="false"
-
-# --- SURVEILLANCE / SÉCURITÉ EN TEMPS RÉEL ---
-# Intervalle en secondes pour les relevés SMART / température
-MONITOR_INTERVAL_SEC=5
-
-# SEUILS DE SECTEURS RÉALLOUÉS (SMART Attribute 5)
-# 
-# Référence industrielle :
-#   0-5 : EXCELLENT (disque neuf)
-#   6-20 : BON (usure normale)
-#   21-50 : ALERTE (dégradation légère, remplacement en mois)
-#   51-100 : CRITIQUE (dégradation rapide, remplacement en semaines)
-#   >100 : DANGEREUX (imminent failure, risque perte de données)
-#
-# Cas d'usage NAS/Serveur critique (haute disponibilité) :
-#   SMART_BAD_SECTOR_THRESHOLD=20
-#   SMART_BAD_SECTOR_DRIFT_THRESHOLD=3
-#
-# Cas d'usage Multimédia personnel (disque multimédia) ← ACTIF
-#   SMART_BAD_SECTOR_THRESHOLD=50
-#   SMART_BAD_SECTOR_DRIFT_THRESHOLD=5
-#
-# Cas d'usage Fin de vie / Test :
-#   SMART_BAD_SECTOR_THRESHOLD=100
-#   SMART_BAD_SECTOR_DRIFT_THRESHOLD=10
-#
-SMART_BAD_SECTOR_THRESHOLD=50
-SMART_BAD_SECTOR_DRIFT_THRESHOLD=5
-
-# SEUILS DE TEMPÉRATURE (en °C)
-# Disque USB tends à chauffer rapidement lors de défragmentation intensive
-DISK_TEMP_THRESHOLD_C=60
-# Raspberry Pi CPU peut atteindre rapidement 85°C sous charge
-SYSTEM_TEMP_THRESHOLD_C=85
-
-# Si true, le script arrête automatiquement les actions lors d'alerte critique
-AUTO_STOP_ON_ALERT="true"
-
-# --- AFFICHAGE DYNAMIQUE ---
-# Nombre de lignes réservées en haut de l'écran pour la zone de surveillance
-MONITOR_DISPLAY_LINES=6
-# --- OUTILS SYSTÈME REQUIS ---
-# Détectés automatiquement selon le FS, mais vous pouvez personnaliser ici
-# (Laisser vide = détection automatique)
-CUSTOM_SCAN_TOOL=""      # Laisser vide pour auto (xfs_bmap ou filefrag)
-CUSTOM_DEFRAG_TOOL=""    # Laisser vide pour auto (xfs_fsr ou e4defrag)
-CUSTOM_FSINFO_TOOL=""    # Laisser vide pour auto (xfs_db ou tune2fs)
-
-
-# ==============================================================================
-# DÉTECTION ET SÉLECTION DU RÉPERTOIRE CIBLE
-# ==============================================================================
-
-# Détecte les disques disponibles et retourne la liste
-detect_available_disks() {
-	local available_disks=()
-	
-	# Utiliser 'df' pour détecter les disques montés pertinents
-	# Filtre sur les systèmes de fichiers supportés (xfs, ext4)
-	while IFS= read -r line; do
-		local mount_point=$(echo "$line" | awk '{print $NF}')
-		local fs_type=$(echo "$line" | awk '{print $(NF-1)}')
-		
-		# Vérifier si c'est un FS supporté et accessible en écriture
-		if [[ "$SUPPORTED_FS_TYPES" =~ $fs_type ]] && [ -w "$mount_point" ] 2>/dev/null; then
-			available_disks+=("$mount_point")
-		fi
-	done < <(df -t xfs -t ext4 2>/dev/null)
-	
-	echo "${available_disks[@]}"
-}
-
-# Prompt interactif pour sélectionner le répertoire cible
-prompt_target_directory() {
-	local -a available_disks=($(detect_available_disks))
-	
-	if [ ${#available_disks[@]} -eq 0 ]; then
-		echo ""
-		echo "⚠️  Aucun disque pertinent détecté"
-		echo "📝 Saisissez manuellement le chemin du répertoire cible :"
-		read -p "   Chemin > " custom_path
-		if [ -d "$custom_path" ] && [ -w "$custom_path" ]; then
-			echo "$custom_path"
-		else
-			echo ""
-			echo "❌ Le chemin n'existe pas ou n'est pas accessible en écriture : $custom_path"
-			return 1
-		fi
-	else
-		echo ""
-		echo "📦 Disques détectés :"
-		for i in "${!available_disks[@]}"; do
-			echo "   $((i + 1)). ${available_disks[$i]}"
-		done
-		echo "   C. Entrer un chemin personnalisé"
-		echo ""
-		read -p "🔍 Sélectionnez un disque [1-$((${#available_disks[@]}))] ou [C] : " choice
-		
-		if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le ${#available_disks[@]} ]; then
-			echo "${available_disks[$((choice - 1))]}"
-		elif [[ "$choice" =~ ^[Cc]$ ]]; then
-			echo ""
-			echo "📝 Saisissez le chemin du répertoire cible :"
-			read -p "   Chemin > " custom_path
-			if [ -d "$custom_path" ] && [ -w "$custom_path" ]; then
-				echo "$custom_path"
-			else
-				echo ""
-				echo "❌ Le chemin n'existe pas ou n'est pas accessible en écriture : $custom_path"
-				return 1
-			fi
-		else
-			echo ""
-			echo "❌ Choix invalide"
-			return 1
-		fi
-	fi
-}
-
-# --------------------------------------------------------------------------------
-# Validation de la configuration et valeurs par défaut sécurisées
-# S'assure que les seuils critiques sont numériques et raisonnables pour éviter des
-# comportements non désirés (ex: INTEL_THRESHOLD_MO=0 qui bloquerait tout).
-# Appeler `validate_config` après le source du fichier de config.
+# Valide la configuration : refuse les valeurs aberrantes au lieu de les corriger
+# silencieusement (une config fausse doit se voir).
 validate_config() {
-	# INTEL_THRESHOLD_MO : doit être un entier >= 1. Valeur par défaut recommandée = 4096
-	if ! [[ "$INTEL_THRESHOLD_MO" =~ ^[0-9]+$ ]] || [ "$INTEL_THRESHOLD_MO" -lt 1 ]; then
-		echo "\n   ⚠️  INTEL_THRESHOLD_MO invalide ou trop faible: réinitialisation à 4096 Mo"
-		INTEL_THRESHOLD_MO=4096
-	fi
-
-	# DEFAULT_MIN_EXTENTS : doit être >= 2
-	if ! [[ "$DEFAULT_MIN_EXTENTS" =~ ^[0-9]+$ ]] || [ "$DEFAULT_MIN_EXTENTS" -lt 2 ]; then
-		echo "\n   ⚠️  DEFAULT_MIN_EXTENTS invalide: réinitialisation à 2"
-		DEFAULT_MIN_EXTENTS=2
-	fi
-
-	# DEFAULT_TOP_LIMIT : doit être >= 1
-	if ! [[ "$DEFAULT_TOP_LIMIT" =~ ^[0-9]+$ ]] || [ "$DEFAULT_TOP_LIMIT" -lt 1 ]; then
-		echo "\n   ⚠️  DEFAULT_TOP_LIMIT invalide: réinitialisation à 10"
-		DEFAULT_TOP_LIMIT=10
-	fi
-
-	# REPORT_MAX_AGE_DAYS : doit être >= 1
-	if ! [[ "$REPORT_MAX_AGE_DAYS" =~ ^[0-9]+$ ]] || [ "$REPORT_MAX_AGE_DAYS" -lt 1 ]; then
-		echo "\n   ⚠️  REPORT_MAX_AGE_DAYS invalide: réinitialisation à 30"
-		REPORT_MAX_AGE_DAYS=30
-	fi
-
-	# ALLOW_SSD_DEFRAG : normaliser à "true" ou "false"
-	if [ "${ALLOW_SSD_DEFRAG,,}" = "true" ]; then
-		ALLOW_SSD_DEFRAG="true"
-	else
-		ALLOW_SSD_DEFRAG="false"
-	fi
-
-	return 0
+    local errors=0 var
+    for var in INTEL_THRESHOLD_MO DEFAULT_MIN_EXTENTS DEFAULT_TOP_LIMIT MIN_FILE_AGE_MIN \
+               GLOBAL_FSR_TIMEOUT_SEC REPORT_MAX_AGE_DAYS QOS_NICE QOS_IO_CLASS \
+               MONITOR_INTERVAL_SEC SMART_BAD_SECTOR_THRESHOLD SMART_BAD_SECTOR_DRIFT_THRESHOLD \
+               DISK_TEMP_THRESHOLD_C SYSTEM_TEMP_THRESHOLD_C; do
+        if ! is_uint "${!var}"; then
+            err "$var doit être un entier positif (valeur : '${!var}')"
+            errors=$((errors + 1))
+        fi
+    done
+    if is_uint "$DEFAULT_MIN_EXTENTS" && (( DEFAULT_MIN_EXTENTS < 2 )); then
+        err "DEFAULT_MIN_EXTENTS doit être >= 2"; errors=$((errors + 1))
+    fi
+    if is_uint "$DEFAULT_TOP_LIMIT" && (( DEFAULT_TOP_LIMIT < 1 )); then
+        err "DEFAULT_TOP_LIMIT doit être >= 1"; errors=$((errors + 1))
+    fi
+    if is_uint "$MONITOR_INTERVAL_SEC" && (( MONITOR_INTERVAL_SEC < 1 )); then
+        err "MONITOR_INTERVAL_SEC doit être >= 1"; errors=$((errors + 1))
+    fi
+    if is_uint "$QOS_IO_CLASS" && (( QOS_IO_CLASS < 1 || QOS_IO_CLASS > 3 )); then
+        err "QOS_IO_CLASS doit valoir 1, 2 ou 3"; errors=$((errors + 1))
+    fi
+    for var in ALLOW_ROOT_FS ALLOW_SSD_DEFRAG QOS_ENABLE MONITOR_ENABLE AUTO_STOP_ON_ALERT DRY_RUN FORCE_SSD; do
+        case "${!var,,}" in
+            true|false) printf -v "$var" '%s' "${!var,,}" ;;
+            *) err "$var doit valoir true ou false (valeur : '${!var}')"; errors=$((errors + 1)) ;;
+        esac
+    done
+    (( errors == 0 ))
 }
