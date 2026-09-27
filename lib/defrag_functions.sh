@@ -86,6 +86,8 @@ process_csv_rows() {
     local limit="$1" min_extents="$2" csv="$3" target="$4"
     local fs bytes extents _h path count=0 rc
     fs=$(fs_type "$target")
+    exec 3< "$csv"
+    read -r -u 3 _h || true                            # en-tête
     while IFS=$'\t' read -r -u 3 bytes extents _h path; do
         (( limit > 0 && count >= limit )) && break
         (( extents < min_extents )) && break          # CSV trié : les suivants sont plus petits
@@ -102,8 +104,11 @@ process_csv_rows() {
         defrag_file "$path" "$extents" "$bytes" "$fs" || rc=$?
         (( rc == EXIT_INTERRUPTED )) && exit "$EXIT_INTERRUPTED"
         count=$((count + 1))
-    done 3< <(csv_rows "$csv")
-    (( count == 0 )) && log "ℹ️  Aucun fichier éligible à la défragmentation."
+    done
+    exec 3<&-
+    if (( count == 0 )) && ! is_true "$STOPPED_BY_MONITOR"; then
+        log "ℹ️  Aucun fichier éligible à la défragmentation."
+    fi
     return 0
 }
 
@@ -114,7 +119,7 @@ process_selected_rows() {
     fs=$(fs_type "$target")
     for num in "$@"; do
         if ! is_uint "$num" || (( num < 1 )); then warn "Numéro ignoré : $num"; continue; fi
-        line=$(csv_rows "$csv" | sed -n "${num}p")
+        line=$(csv_row "$csv" "$num")
         [[ -n "$line" ]] || { warn "Numéro hors classement : $num"; continue; }
         IFS=$'\t' read -r bytes extents _h path <<< "$line"
         monitor_should_stop && { STOPPED_BY_MONITOR=true; err "Arrêt demandé par la surveillance"; break; }

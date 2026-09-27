@@ -16,10 +16,12 @@ display_top() {
     printf '%-4s| %-8s | %-7s | %-9s | %s\n' "N°" "EXTENTS" "TAILLE" "TRAITABLE" "NOM DU FICHIER"
     printf '%s\n' "${RULE//=/-}"
     while IFS=$'\t' read -r bytes extents human path; do
+        [[ "$extents" == Extents ]] && continue        # en-tête
+        (( rank >= limit )) && break
         rank=$((rank + 1))
         if is_eligible "$bytes" "$extents"; then flag="OUI"; else flag="NON*"; fi
         printf '%-3s | %-8s | %-7s | %-9s | %s\n' "$rank" "$extents" "$human" "$flag" "$(basename -- "$path")"
-    done < <(csv_rows "$csv" | head -n "$limit")
+    done < "$csv"
     (( rank == 0 )) && log "   Aucun fichier fragmenté 🎉"
     printf '%s\n' "${RULE//=/-}"
 }
@@ -28,9 +30,10 @@ display_top() {
 display_eligibility_summary() {
     local csv="$1" bytes extents _h _p total=0 eligible=0
     while IFS=$'\t' read -r bytes extents _h _p; do
+        [[ "$extents" == Extents ]] && continue        # en-tête
         total=$((total + 1))
         is_eligible "$bytes" "$extents" && eligible=$((eligible + 1))
-    done < <(csv_rows "$csv")
+    done < "$csv"
     log ""
     if (( INTEL_THRESHOLD_MO == 0 )); then
         log "   Fichiers éligibles : $eligible / $total (filtre intelligent désactivé)"

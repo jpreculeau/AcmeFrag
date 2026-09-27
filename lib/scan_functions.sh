@@ -64,8 +64,11 @@ scan_filesystem() {
 # Nombre de lignes de données du CSV
 csv_count() { local n; n=$(wc -l < "$1"); echo $(( n > 0 ? n - 1 : 0 )); }
 
-# Lignes de données du CSV (sans en-tête), déjà triées
-csv_rows() { tail -n +2 "$1"; }
+# Ligne de données n° N (1 = la plus fragmentée), sans en-tête
+csv_row() { sed -n "$(( $2 + 1 ))p" "$1"; }
+
+# NB : les lectures du CSV se font directement sur le fichier (pas de `tail | head`) :
+# un lecteur qui s'arrête tôt provoquerait un SIGPIPE en amont (code 141).
 
 # Supprime les rapports et journaux plus anciens que REPORT_MAX_AGE_DAYS
 clean_old_reports() {
