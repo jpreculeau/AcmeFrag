@@ -30,8 +30,8 @@ UTILISATION
     acmefrag [DOSSIER] [OPTIONS]
 
     DOSSIER                 Dossier à traiter (dans un montage XFS/EXT4).
-                            Défaut : DEFAULT_TARGET (config), actuellement la
-                            valeur de config.sh / local.conf.
+                            Sans argument : DEFAULT_TARGET (local.conf ou
+                            /etc/acmefrag.conf) ; à défaut, choix interactif.
 
 MODES
     --auto                  Scan + défragmentation des N premiers fichiers
@@ -51,9 +51,9 @@ OPTIONS
     -V, --version           Version
 
 EXEMPLES
-    acmefrag /mnt/HDD --dry-run         # voir ce qui serait fait
-    acmefrag /mnt/HDD/Films --auto      # cron : TOP 10 éligible
-    acmefrag /mnt/HDD -s 0 --auto -n 50 # 50 fichiers, sans filtre
+    acmefrag /mnt/data --dry-run           # voir ce qui serait fait
+    acmefrag /mnt/data/Films --auto        # cron : TOP 10 éligible
+    acmefrag /mnt/data -s 0 --auto -n 50   # 50 fichiers, sans filtre
 
 CONFIGURATION
     config.sh (défauts documentés), surchargés par /etc/acmefrag.conf puis
@@ -184,12 +184,14 @@ load_modules() {
 }
 
 # Choix de la cible : CLI, sinon DEFAULT_TARGET ; en interactif, proposer les
-# montages détectés si la cible par défaut n'est pas un disque monté.
+# montages détectés si aucune cible n'est configurée ou si elle n'est pas montée.
 resolve_target() {
     local mode="$1" target="${CLI_TARGET:-$DEFAULT_TARGET}"
-    if [[ -z "$CLI_TARGET" && "$mode" == interactive ]] \
-       && [[ ! -d "$target" || "$(fs_source "$target")" == "$(fs_source /)" ]]; then
-        warn "Cible par défaut indisponible : $target" >&2
+    if [[ -z "$CLI_TARGET" ]] \
+       && [[ -z "$target" || ! -d "$target" || "$(fs_source "$target")" == "$(fs_source /)" ]]; then
+        [[ "$mode" == interactive ]] || die "$EXIT_USAGE" \
+            "Aucune cible : passez un DOSSIER ou définissez DEFAULT_TARGET dans local.conf (voir --help)"
+        [[ -n "$target" ]] && warn "Cible par défaut indisponible : $target" >&2
         target=$(prompt_target_directory) || exit "$EXIT_USAGE"
     fi
     readlink -f -- "$target" 2>/dev/null || printf '%s\n' "$target"
@@ -202,6 +204,10 @@ main() {
     apply_cli_overrides
     validate_config || die "$EXIT_USAGE" "Configuration invalide"
 
+    # Échouer tôt (avant sudo) si le mode auto n'a aucune cible
+    if [[ -z "$CLI_TARGET" && -z "$DEFAULT_TARGET" && "$(resolve_mode)" == auto ]]; then
+        die "$EXIT_USAGE" "Aucune cible : passez un DOSSIER ou définissez DEFAULT_TARGET dans local.conf (voir --help)"
+    fi
     ensure_root "${ORIGINAL_ARGS[@]}"
     apply_qos "${ORIGINAL_ARGS[@]}"
 

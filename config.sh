@@ -20,7 +20,7 @@ done
 unset _conf
 
 # --- Cible -------------------------------------------------------------------
-: "${DEFAULT_TARGET:=/mnt/HDD}"     # dossier analysé si aucun n'est donné
+: "${DEFAULT_TARGET:=}"                # dossier par défaut (vide = à préciser ou choix interactif)
 : "${ALLOW_ROOT_FS:=false}"            # autoriser le FS racine (/) — déconseillé
 
 # --- Seuils de défragmentation -------------------------------------------------

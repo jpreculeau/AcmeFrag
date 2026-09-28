@@ -51,6 +51,8 @@ check "mode"    eq "$CLI_MODE" auto
 check "option inconnue -> code 2" bash -c "'$ROOT/AcmeFrag.sh' --nope >/dev/null 2>&1; [[ \$? -eq 2 ]]"
 check "-s sans entier -> code 2"  bash -c "'$ROOT/AcmeFrag.sh' -s abc >/dev/null 2>&1; [[ \$? -eq 2 ]]"
 check "deux cibles -> code 2"     bash -c "'$ROOT/AcmeFrag.sh' /a /b >/dev/null 2>&1; [[ \$? -eq 2 ]]"
+check "auto sans cible ni DEFAULT_TARGET -> code 2" bash -c "DEFAULT_TARGET= '$ROOT/AcmeFrag.sh' --auto --no-qos </dev/null >/dev/null 2>&1; [[ \$? -eq 2 ]]"
+check "config par défaut sans chemin personnel" bash -c "! grep -q '^: \"\${DEFAULT_TARGET:=/' '$ROOT/config.sh'"
 check "--help -> code 0"          bash -c "'$ROOT/AcmeFrag.sh' --help | grep -q ACMEFRAG"
 CLI_MODE=""
 check "hors terminal -> mode auto" eq "$(resolve_mode < /dev/null)" auto

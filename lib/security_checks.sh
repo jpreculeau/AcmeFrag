@@ -40,7 +40,7 @@ check_filesystem_type() {
     return 1
 }
 
-# Protège le disque système : si le disque USB est débranché, /mnt/HDD devient
+# Protège le disque système : si le disque externe est débranché, son point de montage devient
 # un simple dossier de la racine — on ne doit surtout pas le « défragmenter ».
 check_not_root_fs() {
     [[ "$(fs_source "$1")" != "$(fs_source /)" ]] && return 0

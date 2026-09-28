@@ -110,7 +110,7 @@ SMART_BAD_SECTOR_THRESHOLD=20
 
 | Variable | Défaut | Rôle |
 |---|---|---|
-| `DEFAULT_TARGET` | `/mnt/HDD` | Cible sans argument |
+| `DEFAULT_TARGET` | *(vide)* | Cible sans argument (vide : argument obligatoire en auto, choix interactif sinon) |
 | `INTEL_THRESHOLD_MO` | `4096` | Extent moyen au-delà duquel le fichier est ignoré |
 | `DEFAULT_TOP_LIMIT` / `DEFAULT_MIN_EXTENTS` | `10` / `2` | Mode auto |
 | `MIN_FILE_AGE_MIN` | `60` | Ignore les fichiers modifiés récemment |
