@@ -269,6 +269,58 @@ check "SMART_GUARD_DAYS non numérique refusé" bash -c "source '$ROOT/lib/commo
 check "SMART_TEMP_ALERT_C non numérique refusé" bash -c "source '$ROOT/lib/common.sh'; ACMEFRAG_HOME='$ROOT' SMART_TEMP_ALERT_C=x; source '$ROOT/config.sh'; ! validate_config 2>/dev/null"
 rm -rf "$REPORT_DIR"
 
+echo "garde-fous disque (montages et périphériques simulés)"
+# shellcheck source=../lib/common.sh
+source "$ROOT/lib/common.sh" 2>/dev/null   # restaure disk_device (readonly : erreurs ignorées)
+# shellcheck disable=SC2317  # fonctions appelées indirectement par le code testé
+{
+findmnt() {
+    local champ="" chemin="" a
+    while (( $# )); do case "$1" in -o|-no) champ="$2"; shift ;; -T) chemin="$2"; shift ;; esac; shift; done
+    if [[ -z "$chemin" ]]; then                     # liste des montages XFS/EXT4
+        printf '259:2 /\n259:2 /srv/lie\n8:1 /mnt/hdd\n8:1 /mnt/mon\\x20disque\n'; return
+    fi
+    local src mm opts=rw,noatime
+    case "$chemin" in
+        /mnt/lie*)   src='/dev/nvme0n1p2[/srv/media]' mm=259:2 ;;
+        /mnt/hdd*)   src=/dev/sda1 mm=8:1 ;;
+        /mnt/crypt*) src=/dev/mapper/crypt mm=254:0 ;;
+        /mnt/ro*)    src=/dev/sda1 mm=8:1 opts=ro,noatime ;;
+        /mnt/inc*)   src=/dev/sdz1 mm=8:99 ;;
+        *)           src=/dev/nvme0n1p2 mm=259:2 ;;
+    esac
+    # findmnt -no MAJ:MIN complète par des espaces («   8:1  »), comme le vrai
+    case "$champ" in SOURCE) echo "$src" ;; MAJ:MIN) printf "  %-6s\\n" "$mm" ;; OPTIONS) echo "$opts" ;; FSTYPE) echo ext4 ;; TARGET) echo "$chemin" ;; esac
+}
+lsblk() {
+    case "${*: -1}" in
+        /dev/sda1)         printf 'sda1 part\nsda disk\n' ;;
+        /dev/mapper/crypt) printf 'crypt crypt\nsda1 part\nsda disk\n' ;;
+        /dev/nvme0n1p2)    printf 'nvme0n1p2 part\nnvme0n1 disk\n' ;;
+        /dev/sdz1)         printf 'sdz1 part\nsdz disk\n' ;;
+    esac
+}
+_disk_rotational() { case "$1" in sda) echo 1 ;; sdz) echo "" ;; *) echo 0 ;; esac; }
+}
+check "bind mount du FS racine -> refusé" not check_not_root_fs /mnt/lie/films
+check "disque monté -> pas le FS racine" check_not_root_fs /mnt/hdd/films
+check "disque d'une partition -> /dev/sda" eq "$(disk_device /mnt/hdd/films)" /dev/sda
+check "disque sous LUKS/LVM -> /dev/sda" eq "$(disk_device /mnt/crypt/x)" /dev/sda
+check "disque d'un bind mount -> /dev/nvme0n1" eq "$(disk_device /mnt/lie/x)" /dev/nvme0n1
+check "bind mount sur NVMe -> ssd" eq "$(disk_kind /mnt/lie/x)" ssd
+check "LUKS/LVM sur HDD -> hdd" eq "$(disk_kind /mnt/crypt/x)" hdd
+check "type de disque inconnu -> refusé" not check_ssd_warning /mnt/inc/x
+check "type inconnu + --force-ssd -> autorisé" eval 'FORCE_SSD=true check_ssd_warning /mnt/inc/x'
+check "SSD -> refusé" not check_ssd_warning /mnt/lie/x
+check "HDD -> autorisé" check_ssd_warning /mnt/hdd/x
+check "montage en lecture seule -> refusé" not check_mounted_rw /mnt/ro/x
+check "montage en lecture-écriture -> autorisé" check_mounted_rw /mnt/hdd/x
+mapfile -t DISQUES < <(detect_available_disks)
+check "montages détectés : racine et ses bind mounts exclus, espaces décodés" eq "${DISQUES[*]}" "/mnt/hdd /mnt/mon disque"
+unset -f findmnt lsblk _disk_rotational
+# shellcheck source=../lib/common.sh
+source "$ROOT/lib/common.sh" 2>/dev/null   # restaure _disk_rotational
+
 echo "sécurité root (fichiers et dossiers)"
 MOI=$(id -u) MON_GID=$(id -g)
 SEC="$ROOT/.securite"; mkdir -p "$SEC/sain" "$SEC/ouvert"; chmod 755 "$ROOT" "$SEC" "$SEC/sain"

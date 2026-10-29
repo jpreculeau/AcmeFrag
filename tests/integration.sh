@@ -101,6 +101,19 @@ test_fs() {
     check "$fs : instance concurrente refusée (code 4)" test "$rc" -eq 4
     exec {fd}>&-
 
+    # Garde-fous sans --force-ssd : un loop non rotatif est vu comme un SSD
+    local rota="/sys/block/${LOOP#/dev/}/queue/rotational"
+    if [[ "$(cat "$rota" 2>/dev/null)" == 0 ]] || { echo 0 > "$rota"; } 2>/dev/null; then
+        rc=0; run_acme "$MNT" --dry-run --no-monitor || rc=$?
+        check "$fs : SSD refusé sans --force-ssd (code 3)" test "$rc" -eq 3
+    else
+        echo "  --   $fs : refus SSD non testé (rotational du loop non modifiable)"
+    fi
+    mount -o remount,ro "$MNT"
+    rc=0; run_acme "$MNT" --dry-run --no-monitor --force-ssd || rc=$?
+    mount -o remount,rw "$MNT"
+    check "$fs : montage en lecture seule refusé (code 3)" test "$rc" -eq 3
+
     # Code ou configuration modifiable par un autre compte : refus en root (code 3)
     chmod o+w "$WORK/acmefrag/lib/common.sh"
     rc=0; run_acme "$MNT" --dry-run --no-monitor --force-ssd || rc=$?

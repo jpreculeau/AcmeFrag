@@ -239,7 +239,7 @@ run_health_mode() {
 resolve_target() {
     local mode="$1" target="${CLI_TARGET:-$DEFAULT_TARGET}"
     if [[ -z "$CLI_TARGET" ]] \
-       && [[ -z "$target" || ! -d "$target" || "$(fs_source "$target")" == "$(fs_source /)" ]]; then
+       && [[ -z "$target" || ! -d "$target" || "$(fs_devno "$target")" == "$(fs_devno /)" ]]; then
         [[ "$mode" == interactive ]] || die "$EXIT_USAGE" \
             "Aucune cible : passez un DOSSIER ou définissez DEFAULT_TARGET dans local.conf (voir --help)"
         [[ -n "$target" ]] && warn "Cible par défaut indisponible : $target" >&2

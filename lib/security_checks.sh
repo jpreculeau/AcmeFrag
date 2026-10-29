@@ -43,7 +43,8 @@ check_filesystem_type() {
 # Protège le disque système : si le disque externe est débranché, son point de montage devient
 # un simple dossier de la racine — on ne doit surtout pas le « défragmenter ».
 check_not_root_fs() {
-    [[ "$(fs_source "$1")" != "$(fs_source /)" ]] && return 0
+    # Comparaison par numéro de périphérique : un bind mount du FS racine est refusé aussi
+    [[ "$(fs_devno "$1")" != "$(fs_devno /)" ]] && return 0
     if is_true "$ALLOW_ROOT_FS"; then
         warn "La cible est sur le FS racine (autorisé par ALLOW_ROOT_FS)."
         return 0
@@ -62,20 +63,16 @@ check_mounted_rw() {
 
 check_ssd_warning() {
     case "$(disk_kind "$1")" in
-        hdd)
-            ok "Disque mécanique (HDD) : défragmentation utile" ;;
-        ssd)
-            warn "Le disque est un SSD/NVMe : la défragmentation use la mémoire flash sans gain."
-            if is_true "$ALLOW_SSD_DEFRAG" || is_true "$FORCE_SSD"; then
-                warn "Forcé par --force-ssd / ALLOW_SSD_DEFRAG : à vos risques et périls."
-            else
-                err "Défragmentation refusée pour protéger le SSD (--force-ssd pour passer outre)."
-                return 1
-            fi ;;
-        *)
-            warn "Type de disque indéterminé : poursuite prudente." ;;
+        hdd) ok "Disque mécanique (HDD) : défragmentation utile"; return 0 ;;
+        ssd) warn "Le disque est un SSD/NVMe : la défragmentation use la mémoire flash sans gain." ;;
+        *)   warn "Type de disque indéterminé : peut-être un SSD." ;;
     esac
-    return 0
+    if is_true "$ALLOW_SSD_DEFRAG" || is_true "$FORCE_SSD"; then
+        warn "Forcé par --force-ssd / ALLOW_SSD_DEFRAG : à vos risques et périls."
+        return 0
+    fi
+    err "Défragmentation refusée pour protéger un SSD possible (--force-ssd pour passer outre)."
+    return 1
 }
 
 check_required_tools() {
@@ -110,12 +107,12 @@ run_security_checks() {
 
 # Montages XFS/EXT4 candidats (hors racine), un par ligne
 detect_available_disks() {
-    local root_src target src
-    root_src=$(fs_source /)
-    while read -r target src; do
-        [[ "$src" == "$root_src" ]] && continue
-        printf '%s\n' "$target"
-    done < <(findmnt -rn -t xfs,ext4 -o TARGET,SOURCE 2>/dev/null)
+    local root_dev devno target
+    root_dev=$(fs_devno /)
+    while read -r devno target; do
+        [[ "$devno" == "$root_dev" ]] && continue      # racine et ses bind mounts
+        printf '%b\n' "$target"                        # findmnt -r échappe les espaces (\x20)
+    done < <(findmnt -rn -t xfs,ext4 -o MAJ:MIN,TARGET 2>/dev/null)
 }
 
 # Menu de sélection : affichage sur stderr, résultat (chemin) sur stdout.
