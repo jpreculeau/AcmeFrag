@@ -1,5 +1,35 @@
 # Changelog
 
+## 4.0.0 — 2026-10-29
+
+Audit de la 3.1.0. Version majeure : en root, des installations jusque-là
+acceptées sont désormais refusées (code `3`), et les codes de sortie changent.
+
+### Sécurité
+- En root, refus (code `3`) du code (`AcmeFrag.sh`, `config.sh`, `lib/`), de `local.conf`, de `/etc/acmefrag.conf` et du dossier de rapports s'ils sont modifiables par un autre compte que root ou l'utilisateur sudo (propriétaire, liens symboliques, droits d'écriture, contrôlés jusqu'à `/`). **Un cron root sur un clone du dossier personnel est refusé** : installer une copie appartenant à root (README, « Sécurité »).
+- Verrou pris sur le dossier des rapports, ouvert en lecture : un lien symbolique posé à la place de l'ancien `.acmefrag.lock` faisait tronquer sa cible par root. Le fichier `.acmefrag.lock` n'est plus utilisé (il peut être supprimé).
+- Journal refusé s'il est un lien symbolique ; total du scan dans un fichier temporaire non prévisible ; rapports rendus à l'utilisateur sudo seulement dans un dossier qui est déjà le sien, sans `chown -R`.
+- Un nom de fichier contenant un retour à la ligne, ou un fichier remplacé par un lien symbolique, ne fait plus traiter un fichier hors de la cible.
+- Noms de fichiers affichés sans caractères de contrôle (séquences de terminal).
+
+### Corrigé
+- Garde-fou FS racine contourné par un bind mount ; garde-fous SSD et santé contournés par un bind mount ou par LUKS/LVM (disque physique mal identifié). Le disque est retrouvé à travers LUKS/LVM, et un type de disque indéterminé est refusé sauf `--force-ssd`.
+- Surveillance : elle arrête désormais l'outil en cours (fichier ou `xfs_fsr` global), et plus seulement entre deux fichiers.
+- Codes de sortie : `143` pour SIGTERM (130 reste Ctrl+C), `1` pour une erreur inattendue (et non le code de la commande fautive), `1` si `flock` manque (et non `4`) ; un outil tué n'est plus pris pour un Ctrl+C.
+- Quota `-n` : les fichiers ignorés (récents, disparus) ne le consomment plus.
+- Entiers à zéro initial (`08`) refusés : ils échouaient ensuite en arithmétique octale.
+- `/etc/acmefrag.conf` en `0600` : plus de « aucune cible » à tort avant `sudo`.
+- En `--dry-run`, SMART lu sans réveiller le disque, et pas de surveillance en mode automatique.
+- Fichiers temporaires du scan supprimés après une interruption.
+- Menu des montages : bind mounts de la racine exclus, points de montage avec espaces corrects.
+- Journal sans codes couleur ; locale `C.UTF-8` imposée quand elle existe ; `--sante` signale les options ignorées.
+- `REPORT_DIR` doit être un chemin absolu.
+
+### Modifié
+- Scan : tailles obtenues par lots et calculées en awk (100 fois plus rapide sur 5000 fichiers fragmentés) ; `numfmt` n'est plus requis ; tailles toujours au format `2.5G` / `7B`.
+- La surveillance utilise l'analyseur SMART de `--sante` (et lit aussi la température NVMe).
+- Tests : intégration sur une copie isolée (sans `local.conf` ni `/etc/acmefrag.conf`), faux `sudo` dans les tests unitaires, garde-fous testés (SSD, lecture seule, racine, espace libre, âge, dry-run, surveillance, rotation), CI épinglée par empreinte.
+
 ## 3.1.0 — 2026-10-29
 
 ### Ajouté

@@ -5,7 +5,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Bash](https://img.shields.io/badge/bash-%23121011.svg?style=flat&logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
 [![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi-red)](https://www.raspberrypi.org/)
-[![Version](https://img.shields.io/badge/version-3.1.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.0.0-green.svg)](CHANGELOG.md)
 
 ## 📖 Description
 
@@ -21,10 +21,10 @@
 
 - 🔍 **Scan rapide** XFS et EXT4 (`filefrag` par lots) → rapport CSV trié
 - 🧠 **Filtre intelligent** : ignore les fichiers dont l'extent moyen dépasse 4 Go (déjà fluides)
-- 🛡️ **Sécurités** : refus du FS racine (disque USB débranché), des SSD, des montages en lecture seule ; verrou anti-double exécution
+- 🛡️ **Sécurités** : refus du FS racine (disque USB débranché, bind mount compris), des SSD et des disques de type indéterminé, des montages en lecture seule ; verrou anti-double exécution ; en root, refus du code et des dossiers modifiables par un autre compte
 - ⏱️ **Fichiers en cours d'écriture ignorés** (modifiés depuis moins d'1 h : téléchargements, synchro)
-- 🐢 **Bridage automatique** : `nice 19` + E/S `idle` — la défragmentation ne passe qu'une fois le disque libre
-- 🌡️ **Surveillance temps réel** : secteurs réalloués SMART, température disque et système, arrêt automatique sur seuil
+- 🐢 **Bridage automatique** : `nice 19` + E/S `idle` — la défragmentation ne passe qu'une fois le disque libre (classe `idle` effective avec l'ordonnanceur BFQ : `cat /sys/block/sdX/queue/scheduler`)
+- 🌡️ **Surveillance temps réel** : secteurs réalloués SMART, température disque et système, arrêt automatique sur seuil (y compris au milieu d'un fichier ou d'un `xfs_fsr` global)
 - 🩺 **Santé du disque** (`--sante`) : relevé SMART en lecture seule (aucun auto-test, disque en veille non réveillé), historique par numéro de série, alertes sur dégradation ; refus de défragmenter un disque qui se dégrade
 - 📊 **Bilan** : avant/après mesuré par fichier, résumé de session, santé de l'espace libre
 - ⚙️ **Deux modes** : interactif (menu) ou automatique (cron)
@@ -37,12 +37,28 @@
 # Dépendances (Debian / Raspberry Pi OS)
 sudo apt install xfsprogs e2fsprogs util-linux coreutils smartmontools
 
-git clone https://github.com/jpreculeau/acmefrag.git
+git clone https://github.com/jpreculeau/AcmeFrag.git acmefrag
 cd acmefrag
 sudo ln -sf "$PWD/AcmeFrag.sh" /usr/local/bin/acmefrag   # optionnel : commande globale
 ```
 
 Le script demande lui-même les droits root (`sudo`) au lancement.
+
+### 🔐 Sécurité
+
+AcmeFrag travaille en root : son code, sa configuration et son dossier de rapports doivent être hors d'atteinte des autres comptes. En root, il refuse (code `3`) tout fichier ou dossier — et chacun de ses parents — qui n'appartient ni à root ni à l'utilisateur qui a lancé `sudo`, qui est un lien symbolique, ou qui est inscriptible par un autre groupe que celui de root ou de cet utilisateur.
+
+- **Lancement par `sudo` depuis votre clone** (cas ci-dessus) : accepté, vous pourriez de toute façon tout faire en root.
+- **Cron root, ou règle sudoers `NOPASSWD` limitée à AcmeFrag** : installez une copie qui appartient à root, sinon n'importe quel processus de votre compte pourrait modifier le code exécuté en root :
+
+```bash
+sudo install -d -o root -g root -m 0755 /usr/local/lib/acmefrag
+sudo cp -r AcmeFrag.sh config.sh lib /usr/local/lib/acmefrag/
+sudo chown -R root:root /usr/local/lib/acmefrag && sudo chmod -R go-w /usr/local/lib/acmefrag
+sudo ln -sf /usr/local/lib/acmefrag/AcmeFrag.sh /usr/local/bin/acmefrag
+```
+
+Les rapports sont alors dans `/usr/local/lib/acmefrag/reports` (ou `REPORT_DIR` dans `/etc/acmefrag.conf`, par exemple `/var/lib/acmefrag`).
 
 ---
 
@@ -109,6 +125,8 @@ La dernière ligne, `BILAN SANTÉ : …`, résume le résultat pour un orchestra
 
 ### Automatiser avec cron
 
+Le cron root exige une copie d'AcmeFrag qui appartient à root (voir [Sécurité](#-sécurité)) : un clone dans votre dossier personnel y est refusé.
+
 ```bash
 sudo crontab -e
 # Chaque dimanche à 3 h : pas de TTY -> mode automatique
@@ -117,7 +135,7 @@ sudo crontab -e
 0 8 * * * /usr/local/bin/acmefrag /mnt/HDD --sante
 ```
 
-Codes de sortie : `0` OK · `1` erreur · `2` usage · `3` refus de sécurité · `4` déjà en cours · `5` arrêt par la surveillance · `130` interruption. Avec `--sante` : `0` pas de nouvelle dégradation · `6` alerte · `7` mesure impossible (SMART indisponible, disque en veille ou non monté).
+Codes de sortie : `0` OK · `1` erreur · `2` usage · `3` refus de sécurité · `4` déjà en cours · `5` arrêt par la surveillance · `130` interruption (Ctrl+C) · `143` arrêt (SIGTERM). Avec `--sante` : `0` pas de nouvelle dégradation · `6` alerte · `7` mesure impossible (SMART indisponible, disque en veille ou non monté) · `3` refus de sécurité (dossier de rapports).
 
 ---
 
@@ -139,7 +157,7 @@ SMART_BAD_SECTOR_THRESHOLD=20
 | `DEFAULT_TOP_LIMIT` / `DEFAULT_MIN_EXTENTS` | `10` / `2` | Mode auto |
 | `MIN_FILE_AGE_MIN` | `60` | Ignore les fichiers modifiés récemment |
 | `SCAN_EXCLUDES` | `*.tmp *.part *.parts *.!qB .syncthing.* *.crdownload` | Motifs exclus |
-| `REPORT_DIR` / `REPORT_MAX_AGE_DAYS` | `./reports` / `30` | Rapports CSV et journaux |
+| `REPORT_DIR` / `REPORT_MAX_AGE_DAYS` | `<dossier d'AcmeFrag>/reports` / `30` | Rapports CSV, journaux et historique santé (chemin absolu) |
 | `QOS_ENABLE` / `QOS_NICE` / `QOS_IO_CLASS` | `true` / `19` / `3` (idle) | Bridage |
 | `MONITOR_ENABLE` / `MONITOR_INTERVAL_SEC` | `true` / `30` | Surveillance |
 | `SMART_BAD_SECTOR_THRESHOLD` / `..._DRIFT_THRESHOLD` | `50` / `5` | Secteurs réalloués (absolu / dérive) |
@@ -149,7 +167,7 @@ SMART_BAD_SECTOR_THRESHOLD=20
 | `SMART_GUARD_DAYS` | `30` | Garde-fou (1 à 3650) : période sur laquelle une hausse des secteurs réalloués bloque la défragmentation |
 | `ALLOW_SSD_DEFRAG` / `ALLOW_ROOT_FS` | `false` | Garde-fous |
 
-Priorité : options CLI > `local.conf` > `/etc/acmefrag.conf` (autre chemin : `ACMEFRAG_SYSTEM_CONF`) > variables d'environnement > défauts.
+Priorité : options CLI > `local.conf` > `/etc/acmefrag.conf` (autre chemin : `ACMEFRAG_SYSTEM_CONF`) > variables d'environnement > défauts. Les variables d'environnement ne servent que si AcmeFrag est lancé directement en root : `sudo` les efface.
 
 ---
 
@@ -193,7 +211,9 @@ sudo make it       # tests d'intégration (images loop, aucun disque réel touch
 
 ## 🐛 Dépannage
 
-- **« est sur le système de fichiers racine »** : le disque n'est pas monté (`findmnt /mnt/HDD`). C'est voulu : on ne défragmente pas la carte SD / le SSD système par erreur.
+- **« est sur le système de fichiers racine »** : le disque n'est pas monté (`findmnt /mnt/HDD`), ou la cible est un bind mount de la racine. C'est voulu : on ne défragmente pas la carte SD / le SSD système par erreur.
+- **« Type de disque indéterminé »** : le noyau ne dit pas si le disque est rotatif (`lsblk -o NAME,ROTA`). `--force-ssd` si vous êtes sûr qu'il s'agit d'un disque dur.
+- **« Refus : … est modifiable par un autre compte »** : voir [Sécurité](#-sécurité) ; `stat -c '%U %G %a' <chemin>` sur le fichier et ses dossiers parents.
 - **« SMART indisponible »** : installez `smartmontools` ; certains ponts USB ne relaient pas SMART.
 - **« Défragmentation refusée : bilan SMART FAILED »** : le disque annonce sa fin ; sauvegardez-le plutôt que de le réorganiser. `acmefrag <cible> --sante` montre l'évolution, `--force-sante` passe outre.
 - **Beaucoup d'« Espace libre insuffisant »** : libérez de la place ou lancez la défragmentation globale (menu 7, XFS).

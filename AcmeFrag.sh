@@ -16,7 +16,7 @@ _locales=$(locale -a 2>/dev/null || true)
 if grep -qixE 'c\.utf-?8' <<< "$_locales"; then export LC_ALL=C.UTF-8; fi
 unset _locales
 
-readonly ACMEFRAG_VERSION="3.1.0"
+readonly ACMEFRAG_VERSION="4.0.0"
 # readlink -f : fonctionne aussi via un lien symbolique (/usr/local/bin/acmefrag)
 ACMEFRAG_HOME="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 readonly ACMEFRAG_HOME
@@ -69,23 +69,28 @@ EXEMPLES
 CONFIGURATION
     config.sh (défauts documentés), surchargés par /etc/acmefrag.conf puis
     local.conf à côté du script. Rapports et journaux : REPORT_DIR
-    (défaut : ${ACMEFRAG_HOME}/reports).
+    (défaut : ${ACMEFRAG_HOME}/reports). Les variables d'environnement ne
+    servent que si AcmeFrag est lancé directement en root (sudo les efface).
 
 SÉCURITÉS
-    Refus si : cible sur le FS racine, FS non XFS/EXT4, montage en lecture seule,
-    SSD (sauf --force-ssd), autre instance en cours, disque en mauvaise santé :
-    bilan SMART autre que PASSED, secteurs en attente, réalloués en hausse sur
+    Refus si : cible sur le FS racine (bind mount compris), FS non XFS/EXT4,
+    montage en lecture seule, SSD ou type de disque indéterminé (sauf
+    --force-ssd), autre instance en cours, disque en mauvaise santé : bilan
+    SMART autre que PASSED, secteurs en attente, réalloués en hausse sur
     SMART_GUARD_DAYS jours d'historique --sante (sauf --force-sante ;
-    avertissement seul en --dry-run). Fichiers modifiés depuis moins
-    de MIN_FILE_AGE_MIN minutes ignorés (téléchargement / synchro en cours).
-    Tâche bridée par défaut : nice 19 + E/S « idle ».
+    avertissement seul en --dry-run). En root : refus du code, de la
+    configuration ou du dossier de rapports modifiables par un autre compte
+    que root ou l'utilisateur sudo. Fichiers modifiés depuis moins de
+    MIN_FILE_AGE_MIN minutes, liens symboliques et chemins hors de la cible
+    ignorés. Surveillance : arrêt de l'outil en cours sur seuil critique.
+    Tâche bridée par défaut : nice 19 + E/S « idle » (effectif avec BFQ).
 
 CODES DE SORTIE
     0 OK · 1 erreur · 2 usage · 3 refus sécurité · 4 déjà en cours ·
     5 arrêt par la surveillance · 130 interruption (Ctrl+C) · 143 arrêt (SIGTERM)
     --sante : 0 pas de nouvelle dégradation · 6 alerte · 7 mesure impossible
-    (SMART indisponible, disque en veille ou non monté). Dernière ligne :
-    « BILAN SANTÉ : … »
+    (SMART indisponible, disque en veille ou non monté) · 3 refus de sécurité
+    (dossier de rapports). Dernière ligne, sauf refus : « BILAN SANTÉ : … »
 EOF
 }
 
