@@ -143,6 +143,13 @@ check "parse : série hostile assainie (tabulation, échappement)" \
 check "parse : « No Errors Logged » -> 0 erreur ATA" \
     eq "$(sed -E 's/^ATA Error Count.*/No Errors Logged/' "$FIX" | _health_parse | cut -f13)" 0
 
+check "surveillance : secteurs réalloués et température" eq "$(_smart_read /dev/fake "")" "40 40"
+smart_out 's/^(194 Temperature_Celsius.*)$/190 Airflow_Temperature_Cel 0x0022 059 045 045 Old_age Always - 41\n\1/'
+check "surveillance : attribut 194 prioritaire sur 190 (comme --sante)" eq "$(_smart_read /dev/fake "")" "40 40"
+check "surveillance : valeur brute non numérique ignorée" eq "$(sed -E 's/(Reallocated_Sector_Ct .*)40$/\1x/' "$FIX" | _health_parse | cut -f4)" NA
+check "parse : température NVMe (« Temperature: 45 Celsius »)" \
+    eq "$(printf 'Serial Number: N1\nSMART overall-health self-assessment test result: PASSED\nTemperature:                        45 Celsius\n' | _health_parse | cut -f8)" 45
+reset_smart
 mesure
 check "1re mesure PASSED -> code 0" eq "$HC_RC" 0
 check "historique créé (en-tête + 1 mesure)" eq "$(wc -l < "$HIST")" 2

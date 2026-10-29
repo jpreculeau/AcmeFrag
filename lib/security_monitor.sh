@@ -12,15 +12,15 @@
 MONITOR_DIR=""
 MONITOR_PID=""
 
-# Affiche "secteurs_realloues temperature" (NA si indisponible)
+# Affiche "secteurs_realloues temperature" (NA si indisponible), avec l'analyseur
+# de --sante (_health_parse) : mêmes règles, valeurs numériques seulement.
 _smart_read() {
-    local dev="$1" args="$2"
+    local dev="$1" args="$2" rec
+    local -a f=()
     # shellcheck disable=SC2086
-    smartctl -A $args "$dev" 2>/dev/null | awk '
-        $1 == 5                   { bad = $10 }
-        ($1 == 194 || $1 == 190) && temp == "" { temp = $10 }
-        /^Temperature:/           { if (temp == "") temp = $2 }   # NVMe
-        END { print (bad == "" ? "NA" : bad), (temp == "" ? "NA" : temp) }'
+    rec=$( { smartctl -A $args "$dev" 2>/dev/null || true; } | _health_parse)
+    IFS=$'\t' read -ra f <<< "$rec"          # série, puis les colonnes HEALTH_COLS
+    printf '%s %s\n' "${f[$(( $(_col 5) + 1 ))]}" "${f[$(( $(_col 194) + 1 ))]}"
 }
 
 _system_temp() {

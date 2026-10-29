@@ -56,7 +56,7 @@ smart_args() {
 # Texte smartctl (stdin) -> "série<TAB>bilan<TAB>attributs…<TAB>erreurs ATA"
 # NA pour toute valeur absente ou non numérique ; série réduite à [A-Za-z0-9._-]
 # (une tabulation ou une séquence de terminal ne doit ni décaler les colonnes ni
-# atteindre l'affichage). Température : attribut 194, à défaut 190.
+# atteindre l'affichage). Température : attribut 194, à défaut 190, à défaut NVMe.
 _health_parse() {
     LC_ALL=C awk -v ids="${HEALTH_ATTRS[*]}" '
         BEGIN { n = split(ids, id, " ") }
@@ -64,6 +64,7 @@ _health_parse() {
         /self-assessment test result:/ { health = $NF }
         /^SMART Health Status:/ { health = ($4 == "OK") ? "PASSED" : $4 }
         /^ATA Error Count:/ { ata = $4 }
+        /^Temperature:/ { nvme_temp = $2 }                      # NVMe : « Temperature: 45 Celsius »
         /^No Errors Logged/ { ata = 0 }
         /^ID# +ATTRIBUTE_NAME/ { inattr = 1; next }
         inattr && NF == 0 { inattr = 0 }
@@ -73,6 +74,7 @@ _health_parse() {
             gsub(/[^A-Za-z0-9._-]/, "_", serial)
             gsub(/[^A-Za-z]/, "", health); health = substr(health, 1, 32)
             if (!(194 in raw) && (190 in raw)) raw[194] = raw[190]
+            if (!(194 in raw) && nvme_temp ~ /^[0-9]+$/) raw[194] = nvme_temp
             if (ata !~ /^[0-9]+$/) ata = ""
             printf "%s\t%s", (serial == "" ? "NA" : serial), (health == "" ? "NA" : health)
             for (i = 1; i <= n; i++) printf "\t%s", (((id[i] + 0) in raw) ? raw[id[i] + 0] : "NA")
