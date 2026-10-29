@@ -49,8 +49,9 @@ scan_filesystem() {
         printf '%s\n' "$CSV_HEADER"
         while IFS=$'\t' read -r n path; do
             if [[ "$n" == "#TOTAL" ]]; then printf '%s' "$path" > "$total_file"; continue; fi
-            # Chemin non représentable dans un CSV TAB (TAB / retour ligne dans le nom)
-            [[ "$path" == *$'\t'* || ! -f "$path" ]] && continue
+            # Chemin non représentable dans un CSV TAB (TAB dans le nom), ou hors de la
+            # cible (morceau d'un nom à retour à la ligne, relatif au dossier courant)
+            [[ "$path" == *$'\t'* || "$path" != "${target%/}"/* || ! -f "$path" ]] && continue
             size=$(stat -c %s -- "$path" 2>/dev/null) || continue
             printf '%s\t%s\t%s\t%s\n' "$size" "$n" "$(human_size "$size")" "$path"
         done < <(_scan_extents "$target") | sort -t $'\t' -k2,2rn -k1,1rn

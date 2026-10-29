@@ -30,18 +30,32 @@ _defrag_cmd() {
     esac
 }
 
-# Défragmente un fichier. $1 = chemin, $2 = extents (scan), $3 = octets, $4 = FS
-# Retour : 0 (traité ou ignoré), 130 (interruption Ctrl+C)
+# Le fichier $1 est-il bien dans la cible $2 ? Chemin absolu sous la cible, sans
+# « .. », pas un lien symbolique, sur le même FS. Un nom hostile (retour à la
+# ligne) ou un fichier remplacé par un lien entre le scan et la défragmentation
+# ne doit pas faire traiter un fichier d'ailleurs, hors des garde-fous.
+path_in_target() {
+    local path="$1" target="${2%/}"
+    [[ "$path" == "$target"/* && "$path" != *"/../"* && ! -L "$path" && -f "$path" ]] || return 1
+    [[ "$(stat -c %d -- "$path")" == "$(stat -c %d -- "${target:-/}")" ]]
+}
+
+# Défragmente un fichier. $1 = chemin, $2 = extents (scan), $3 = octets, $4 = FS,
+# $5 = cible. Retour : 0 (traité ou ignoré), 130 (interruption Ctrl+C)
 defrag_file() {
-    local path="$1" extents="$2" bytes="$3" fs="$4"
+    local path="$1" extents="$2" bytes="$3" fs="$4" target="$5"
     local name age avail after rc output reason
     local -a cmd=()
     name=$(basename -- "$path")
     (( ${#name} > 45 )) && name="${name:0:42}..."
     printf '⏳ [%s] (%6s) %-45s : ' "$(date +%H:%M:%S)" "$(human_size "$bytes")" "$name"
 
-    if [[ ! -f "$path" ]]; then
+    if [[ ! -e "$path" && ! -L "$path" ]]; then
         printf '%sDisparu depuis le scan ⏭️%s\n' "$C_YELLOW" "$C_RESET"
+        STAT_SKIPPED=$((STAT_SKIPPED + 1)); return 0
+    fi
+    if ! path_in_target "$path" "$target"; then
+        printf '%sHors de la cible ou lien symbolique ⏭️%s\n' "$C_YELLOW" "$C_RESET"
         STAT_SKIPPED=$((STAT_SKIPPED + 1)); return 0
     fi
     age=$(file_age_min "$path" || echo 0)
@@ -101,7 +115,7 @@ process_csv_rows() {
         fi
         monitor_status_line
         rc=0
-        defrag_file "$path" "$extents" "$bytes" "$fs" || rc=$?
+        defrag_file "$path" "$extents" "$bytes" "$fs" "$target" || rc=$?
         (( rc == EXIT_INTERRUPTED )) && exit "$EXIT_INTERRUPTED"
         count=$((count + 1))
     done
@@ -123,7 +137,7 @@ process_selected_rows() {
         [[ -n "$line" ]] || { warn "Numéro hors classement : $num"; continue; }
         IFS=$'\t' read -r bytes extents _h path <<< "$line"
         monitor_should_stop && { STOPPED_BY_MONITOR=true; err "Arrêt demandé par la surveillance"; break; }
-        defrag_file "$path" "$extents" "$bytes" "$fs" || exit "$EXIT_INTERRUPTED"
+        defrag_file "$path" "$extents" "$bytes" "$fs" "$target" || exit "$EXIT_INTERRUPTED"
     done
 }
 

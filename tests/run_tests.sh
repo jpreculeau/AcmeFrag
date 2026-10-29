@@ -321,6 +321,49 @@ unset -f findmnt lsblk _disk_rotational
 # shellcheck source=../lib/common.sh
 source "$ROOT/lib/common.sh" 2>/dev/null   # restaure _disk_rotational
 
+echo "défragmentation d'un fichier (outils simulés)"
+DF="$ROOT/.defrag"; mkdir -p "$DF/cible" "$DF/bin" "$DF/ailleurs"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> %q\n' "$DF/appels" > "$DF/bin/xfs_fsr"; chmod +x "$DF/bin/xfs_fsr"
+printf 'x' > "$DF/cible/vieux.mkv"; touch -d '2 days ago' "$DF/cible/vieux.mkv"
+printf 'x' > "$DF/cible/recent.mkv"
+printf 'x' > "$DF/ailleurs/autre.mkv"; touch -d '2 days ago' "$DF/ailleurs/autre.mkv"
+ln -s "$DF/ailleurs/autre.mkv" "$DF/cible/lien.mkv"; touch -h -d '2 days ago' "$DF/cible/lien.mkv"
+defrag() {  # defrag CHEMIN : lance defrag_file, note la sortie et les appels à l'outil
+    : > "$DF/appels"; STAT_SKIPPED=0 STAT_FAILED=0 STAT_SIMULATED=0 STAT_OK=0 STAT_ALREADY=0
+    PATH="$DF/bin:$PATH" defrag_file "$1" 5 1 xfs "$DF/cible" > "$DF/sortie" 2>&1
+}
+MIN_FILE_AGE_MIN=60 DRY_RUN=false
+defrag "$DF/cible/vieux.mkv"
+check "fichier ancien : outil lancé" eq "$(cat "$DF/appels")" "-v $DF/cible/vieux.mkv"
+defrag "$DF/cible/recent.mkv"
+check "fichier récent : outil jamais lancé" eq "$(cat "$DF/appels")" ""
+check "fichier récent : compté ignoré" eq "$STAT_SKIPPED" 1
+defrag "$DF/cible/absent.mkv"
+check "fichier disparu : outil jamais lancé" eq "$(cat "$DF/appels")" ""
+defrag "$DF/cible/lien.mkv"
+check "lien symbolique : outil jamais lancé" eq "$(cat "$DF/appels")" ""
+defrag "$DF/ailleurs/autre.mkv"
+check "fichier hors de la cible : outil jamais lancé" eq "$(cat "$DF/appels")" ""
+defrag "$DF/cible/../ailleurs/autre.mkv"
+check "chemin en « .. » : outil jamais lancé" eq "$(cat "$DF/appels")" ""
+DRY_RUN=true defrag "$DF/cible/vieux.mkv"
+check "dry-run : outil jamais lancé" eq "$(cat "$DF/appels")" ""
+check "dry-run : compté simulé" eq "$STAT_SIMULATED" 1
+# shellcheck disable=SC2317  # appelée par defrag_file
+fs_avail_bytes() { echo 0; }
+defrag "$DF/cible/vieux.mkv"
+check "espace libre insuffisant : outil jamais lancé" eq "$(cat "$DF/appels")" ""
+check "espace libre insuffisant : compté en échec" eq "$STAT_FAILED" 1
+# shellcheck source=../lib/common.sh
+source "$ROOT/lib/common.sh" 2>/dev/null   # restaure fs_avail_bytes
+# Scan : un nom à retour à la ligne ne doit pas faire entrer un chemin relatif au CSV
+# shellcheck disable=SC2016  # $f est développé par le faux filefrag
+printf '#!/usr/bin/env bash\nfor f; do printf "%%s: 5 extents found\\n" "$f"; done\n' > "$DF/bin/filefrag"; chmod +x "$DF/bin/filefrag"
+mkdir -p "$DF/scan"; printf 'x' > "$DF/scan/a"$'\n'"hors.txt"; printf 'x' > "$DF/hors.txt"
+( cd "$DF" && PATH="$DF/bin:$PATH" scan_filesystem "$DF/scan" "$DF/f.csv" >/dev/null 2>&1 )
+check "scan : chemin hors de la cible écarté du CSV" not grep -q 'hors.txt' "$DF/f.csv"
+rm -rf "$DF"; MIN_FILE_AGE_MIN=60 DRY_RUN=false
+
 echo "sécurité root (fichiers et dossiers)"
 MOI=$(id -u) MON_GID=$(id -g)
 SEC="$ROOT/.securite"; mkdir -p "$SEC/sain" "$SEC/ouvert"; chmod 755 "$ROOT" "$SEC" "$SEC/sain"
