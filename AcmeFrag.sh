@@ -182,6 +182,13 @@ give_reports_back() {
         -exec chown -h -- "${SUDO_UID}:${SUDO_GID:-$SUDO_UID}" {} + 2>/dev/null || true
 }
 
+# Erreur non prévue (trap ERR) : la signaler et sortir en 1, quel que soit le code
+# de la commande fautive (un 2 serait lu « usage »). $1 ligne, $2 code, $3 commande.
+on_error() {
+    err "Erreur inattendue ligne $1 (code $2) : $(printable "$3")"
+    exit "$EXIT_ERROR"
+}
+
 # $1 = code de sortie (130 Ctrl+C, 143 SIGTERM)
 on_interrupt() {
     trap - INT TERM
@@ -193,6 +200,7 @@ on_interrupt() {
 # Verrou : une seule instance par dossier de rapports (cron + manuel). Pris sur
 # le dossier lui-même, ouvert en lecture : aucun fichier créé ni tronqué en root.
 acquire_lock() {
+    command -v flock >/dev/null 2>&1 || die "$EXIT_ERROR" "flock introuvable (paquet util-linux)."
     exec {LOCK_FD}< "$REPORT_DIR"
     flock -n "$LOCK_FD" || die "$EXIT_LOCKED" "Une autre instance d'AcmeFrag est en cours."
 }
@@ -265,8 +273,11 @@ main() {
     apply_cli_overrides
     validate_config || die "$EXIT_USAGE" "Configuration invalide"
 
-    # Échouer tôt (avant sudo) si le mode auto n'a aucune cible
-    if [[ -z "$CLI_TARGET" && -z "$DEFAULT_TARGET" ]] && [[ -n "$CLI_HEALTH" || "$(resolve_mode)" == auto ]]; then
+    # Échouer tôt (avant sudo) si le mode auto n'a aucune cible ; sauf si la
+    # configuration système, illisible avant sudo (0600), peut en définir une
+    local sysconf="${ACMEFRAG_SYSTEM_CONF:-/etc/acmefrag.conf}"
+    if [[ -z "$CLI_TARGET" && -z "$DEFAULT_TARGET" ]] && ! [[ -e "$sysconf" && ! -r "$sysconf" ]] \
+       && [[ -n "$CLI_HEALTH" || "$(resolve_mode)" == auto ]]; then
         die "$EXIT_USAGE" "Aucune cible : passez un DOSSIER ou définissez DEFAULT_TARGET dans local.conf (voir --help)"
     fi
     ensure_root "${ORIGINAL_ARGS[@]}"
@@ -287,16 +298,16 @@ main() {
     trap cleanup EXIT
     trap 'on_interrupt "$EXIT_INTERRUPTED"' INT
     trap 'on_interrupt "$EXIT_TERMINATED"' TERM
-    trap 'err "Erreur inattendue ligne ${LINENO} (code $?) : ${BASH_COMMAND}"' ERR
+    trap 'on_error "${LINENO}" "$?" "${BASH_COMMAND}"' ERR
 
     printf '%s\n   🚀 ACMEFRAG v%s — %s — %s\n%s\n' "$RULE" "$ACMEFRAG_VERSION" "$(date '+%Y-%m-%d %H:%M:%S')" "$mode" "$RULE"
-    log "   Cible   : $target"
+    log "   Cible   : $(printable "$target")"
     log "   Seuil   : $( (( INTEL_THRESHOLD_MO == 0 )) && echo 'désactivé' || echo "${INTEL_THRESHOLD_MO} Mo/extent" )"
     log "   Dry-run : $DRY_RUN · QoS : $( [[ -n "${ACMEFRAG_QOS_APPLIED:-}" ]] && echo "nice ${QOS_NICE} + ionice -c${QOS_IO_CLASS}" || echo 'désactivée' )"
 
     run_security_checks "$target" || exit "$EXIT_REFUSED"
 
-    if is_true "$MONITOR_ENABLE"; then
+    if monitor_wanted "$mode"; then
         start_security_monitor "$target"
     fi
 

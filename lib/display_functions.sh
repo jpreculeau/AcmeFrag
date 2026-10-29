@@ -20,7 +20,7 @@ display_top() {
         (( rank >= limit )) && break
         rank=$((rank + 1))
         if is_eligible "$bytes" "$extents"; then flag="OUI"; else flag="NON*"; fi
-        printf '%-3s | %-8s | %-7s | %-9s | %s\n' "$rank" "$extents" "$human" "$flag" "$(basename -- "$path")"
+        printf '%-3s | %-8s | %-7s | %-9s | %s\n' "$rank" "$extents" "$human" "$flag" "$(printable "$(basename -- "$path")")"
     done < "$csv"
     (( rank == 0 )) && log "   Aucun fichier fragmenté 🎉"
     printf '%s\n' "${RULE//=/-}"

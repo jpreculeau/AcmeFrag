@@ -240,9 +240,16 @@ _health_refusal() {
 # Garde-fou : pas d'écritures massives sur un disque qui se dégrade. Compare à
 # l'historique de --sante (_health_baseline) sans l'écrire : c'est --sante qui le tient.
 check_disk_health() {
-    local dev rec reason
+    local dev rec reason rc=0
+    local -a opts=()
     dev=$(disk_device "$1")
-    if ! rec=$(_health_read "$dev"); then
+    # Simulation : rien ne sera écrit, inutile de réveiller un disque en veille
+    is_true "$DRY_RUN" && opts=(-n standby)
+    rec=$(_health_read "$dev" "${opts[@]}") || rc=$?
+    if (( rc == 2 )); then
+        warn "$dev en veille : santé non vérifiée (simulation, disque non réveillé)"
+        return 0
+    elif (( rc != 0 )); then
         warn "Santé SMART de $dev non vérifiable : poursuite"
         return 0
     fi

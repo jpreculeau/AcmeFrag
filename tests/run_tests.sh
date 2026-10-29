@@ -233,6 +233,8 @@ FORCE_HEALTH=true garde
 check "--force-sante -> autorisé" eq "$CD_RC" 0
 DRY_RUN=true garde
 check "dry-run -> avertissement seulement" eq "$CD_RC" 0
+: > "$FAKE_SMART_LOG"; DRY_RUN=true garde
+check "dry-run : SMART lu sans réveiller le disque (-n standby)" not grep -qv -- "-n standby" "$FAKE_SMART_LOG"
 smart_out 's/(Reallocated_Sector_Ct .*)40$/\141/'; garde
 check "réalloués en hausse depuis la dernière mesure -> refus" eq "$CD_RC" 1
 smart_out 's/result: PASSED/result: HARDWARE IMPENDING FAILURE!/'; garde
@@ -448,6 +450,35 @@ printf '#!/usr/bin/env bash\nkill -INT "$ACME_TEST_PID"; sleep 2\n' > "$SEC/bin2
 PATH="$SEC/bin2:$PATH" bash -c "source '$ROOT/AcmeFrag.sh'; load_modules; export ACME_TEST_PID=\$\$; trap cleanup EXIT; trap 'exit 130' INT; REPORT_DIR='$SEC/scanrep'; scan_filesystem '$SEC/scan' '$SEC/scanrep/fragmentation_x.csv'" >/dev/null 2>&1
 check "scan interrompu : aucun temporaire laissé" eq "$(ls -A "$SEC/scanrep")" ""
 rm -rf "$SEC"
+
+echo "mineurs : affichage, entiers, codes, quota, configuration"
+check "nom avec séquence de terminal : neutralisé à l'affichage" eq "$(printable $'film\e]0;PIRATE\a\e[2J.mkv')" "film?]0;PIRATE??[2J.mkv"
+MN="$ROOT/.mineurs"; mkdir -p "$MN"
+printf '%s\n' "$CSV_HEADER" $'5\t3\t5B\t/m/film\e[2J.mkv' > "$MN/f.csv"
+check "classement : aucune séquence de terminal" not grep -q $'\e' <<< "$(display_top "$MN/f.csv" 5)"
+check "entier à zéro initial refusé (08)" not is_uint 08
+check "zéro seul accepté" is_uint 0
+check "-s 08 -> code 2" bash -c "'$ROOT/AcmeFrag.sh' /x -s 08 >/dev/null 2>&1; [[ \$? -eq 2 ]]"
+check "erreur inattendue -> code 1" bash -c "source '$ROOT/AcmeFrag.sh'; load_modules; set +e; (on_error 12 2 'sort x') 2>/dev/null; [[ \$? -eq 1 ]]"
+check "flock absent -> code 1 (pas « déjà en cours »)" bash -c "source '$ROOT/AcmeFrag.sh'; load_modules; set +e; REPORT_DIR='$MN'; (PATH=/nonexistent; acquire_lock) 2>/dev/null; [[ \$? -eq 1 ]]"
+# Quota -n : un fichier ignoré (récent) ne consomme pas la place d'un fichier traitable
+mkdir -p "$MN/cible"; for f in r1 r2 vieux; do printf 'x' > "$MN/cible/$f.mkv"; done
+touch -d '2 days ago' "$MN/cible/vieux.mkv"
+printf '%s\n' "$CSV_HEADER" $'1\t9\t1B\t'"$MN/cible/r1.mkv" $'1\t8\t1B\t'"$MN/cible/r2.mkv" $'1\t7\t1B\t'"$MN/cible/vieux.mkv" > "$MN/q.csv"
+STAT_SIMULATED=0 STAT_SKIPPED=0 DRY_RUN=true MIN_FILE_AGE_MIN=60 MONITOR_DIR=""
+process_csv_rows 1 2 "$MN/q.csv" "$MN/cible" > /dev/null 2>&1
+check "quota -n 1 : fichiers récents ignorés sans consommer le quota" eq "$STAT_SIMULATED" 1
+DRY_RUN=false
+# /etc/acmefrag.conf illisible avant sudo (0600) : ne pas conclure « aucune cible »
+mkdir -p "$MN/sudo"; printf '#!/usr/bin/env bash\necho appel >> %q\nexit 0\n' "$MN/sudo.log" > "$MN/sudo/sudo"; chmod +x "$MN/sudo/sudo"
+: > "$MN/etc.conf"; chmod 000 "$MN/etc.conf"
+PATH="$MN/sudo:$PATH" ACMEFRAG_SYSTEM_CONF="$MN/etc.conf" DEFAULT_TARGET="" "$ROOT/AcmeFrag.sh" --auto --dry-run </dev/null >/dev/null 2>&1
+check "configuration système illisible avant sudo : relance par sudo" test -s "$MN/sudo.log"
+check "surveillance inutile en simulation automatique" not eval 'DRY_RUN=true MONITOR_ENABLE=true monitor_wanted auto'
+check "surveillance active en simulation interactive (dry-run désactivable)" eval 'DRY_RUN=true MONITOR_ENABLE=true monitor_wanted interactive'
+check "surveillance active hors simulation" eval 'DRY_RUN=false MONITOR_ENABLE=true monitor_wanted auto'
+check "surveillance désactivée par --no-monitor" not eval 'DRY_RUN=false MONITOR_ENABLE=false monitor_wanted auto'
+rm -rf "$MN"
 
 echo "isolation"
 check "aucun appel à sudo pendant les tests" eq "$(cat "$SUDO_LOG")" ""

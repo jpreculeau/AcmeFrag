@@ -68,6 +68,13 @@ _monitor_loop() {
     done
 }
 
+# Surveillance utile ? Pas en simulation automatique (rien n'est écrit) ; en
+# interactif oui, le dry-run pouvant être désactivé depuis le menu. $1 = mode.
+monitor_wanted() {
+    is_true "$MONITOR_ENABLE" || return 1
+    ! is_true "$DRY_RUN" || [[ "$1" == interactive ]]
+}
+
 start_security_monitor() {
     local target="$1" dev args="" smart=false
     dev=$(disk_device "$target")

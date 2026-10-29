@@ -67,7 +67,7 @@ defrag_file() {
     local path="$1" extents="$2" bytes="$3" fs="$4" target="$5"
     local name age avail after rc output reason out
     local -a cmd=()
-    name=$(basename -- "$path")
+    name=$(printable "$(basename -- "$path")")
     (( ${#name} > 45 )) && name="${name:0:42}..."
     printf '⏳ [%s] (%6s) %-45s : ' "$(date +%H:%M:%S)" "$(human_size "$bytes")" "$name"
 
@@ -124,7 +124,7 @@ defrag_file() {
 # $2 = extents minimum, $3 = CSV, $4 = cible
 process_csv_rows() {
     local limit="$1" min_extents="$2" csv="$3" target="$4"
-    local fs bytes extents _h path count=0
+    local fs bytes extents _h path count=0 skipped
     fs=$(fs_type "$target")
     exec 3< "$csv"
     read -r -u 3 _h || true                            # en-tête
@@ -140,8 +140,9 @@ process_csv_rows() {
             break
         fi
         monitor_status_line
+        skipped=$STAT_SKIPPED
         defrag_file "$path" "$extents" "$bytes" "$fs" "$target"
-        count=$((count + 1))
+        (( STAT_SKIPPED > skipped )) || count=$((count + 1))   # ignoré : quota intact
         is_true "$STOPPED_BY_MONITOR" && break
     done
     exec 3<&-

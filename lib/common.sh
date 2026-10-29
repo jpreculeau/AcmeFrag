@@ -41,8 +41,13 @@ err()   { printf '   %s❌ %s%s\n' "$C_RED" "$*" "$C_RESET" >&2; }
 die()   { local code="$1"; shift; err "$*"; exit "$code"; }
 title() { printf '\n%s\n---   %s\n%s\n' "$RULE" "$*" "$RULE"; }
 
-is_uint() { [[ "${1:-}" =~ ^[0-9]+$ ]]; }
+# Entier positif sans zéro initial : « 08 » serait lu en octal par (( )) et échouerait
+is_uint() { [[ "${1:-}" =~ ^(0|[1-9][0-9]*)$ ]]; }
 is_true() { [[ "${1,,}" == "true" ]]; }
+
+# Texte d'un autre processus (nom de fichier…) sans caractère de contrôle : une
+# séquence de terminal ne doit atteindre ni l'écran de root ni le journal.
+printable() { printf '%s\n' "${1//[[:cntrl:]]/?}"; }
 
 # Taille lisible (octets -> "2.4G"). numfmt fait partie de coreutils.
 human_size() { numfmt --to=iec --format='%.1f' "$1" 2>/dev/null || printf '%sB' "$1"; }

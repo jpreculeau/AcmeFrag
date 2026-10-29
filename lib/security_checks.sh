@@ -123,7 +123,7 @@ prompt_target_directory() {
         echo ""
         if (( ${#disks[@]} > 0 )); then
             echo "📦 Montages XFS/EXT4 détectés :"
-            for i in "${!disks[@]}"; do echo "   $((i + 1)). ${disks[$i]}"; done
+            for i in "${!disks[@]}"; do echo "   $((i + 1)). $(printable "${disks[$i]}")"; done
         else
             echo "⚠️  Aucun montage XFS/EXT4 détecté hors racine."
         fi
