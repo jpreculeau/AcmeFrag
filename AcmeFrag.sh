@@ -76,7 +76,7 @@ SÉCURITÉS
 
 CODES DE SORTIE
     0 OK · 1 erreur · 2 usage · 3 refus sécurité · 4 déjà en cours ·
-    5 arrêt par la surveillance · 130 interruption (Ctrl+C)
+    5 arrêt par la surveillance · 130 interruption (Ctrl+C) · 143 arrêt (SIGTERM)
     --sante : 0 pas de nouvelle dégradation · 6 alerte · 7 mesure impossible
     (SMART indisponible, disque en veille ou non monté). Dernière ligne :
     « BILAN SANTÉ : … »
@@ -182,10 +182,12 @@ give_reports_back() {
         -exec chown -h -- "${SUDO_UID}:${SUDO_GID:-$SUDO_UID}" {} + 2>/dev/null || true
 }
 
+# $1 = code de sortie (130 Ctrl+C, 143 SIGTERM)
 on_interrupt() {
     trap - INT TERM
+    [[ -z "${CHILD_PID:-}" ]] || kill -TERM "$CHILD_PID" 2>/dev/null || true
     printf '\n%s\n      Bye ! Bye ! (interrompu)\n%s\n' "$RULE" "$RULE"
-    exit "$EXIT_INTERRUPTED"
+    exit "$1"
 }
 
 # Verrou : une seule instance par dossier de rapports (cron + manuel). Pris sur
@@ -283,7 +285,8 @@ main() {
     acquire_lock
 
     trap cleanup EXIT
-    trap on_interrupt INT TERM
+    trap 'on_interrupt "$EXIT_INTERRUPTED"' INT
+    trap 'on_interrupt "$EXIT_TERMINATED"' TERM
     trap 'err "Erreur inattendue ligne ${LINENO} (code $?) : ${BASH_COMMAND}"' ERR
 
     printf '%s\n   🚀 ACMEFRAG v%s — %s — %s\n%s\n' "$RULE" "$ACMEFRAG_VERSION" "$(date '+%Y-%m-%d %H:%M:%S')" "$mode" "$RULE"

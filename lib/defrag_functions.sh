@@ -11,6 +11,27 @@
 # Compteurs de session
 STAT_OK=0 STAT_ALREADY=0 STAT_SKIPPED=0 STAT_FAILED=0 STAT_SIMULATED=0
 STOPPED_BY_MONITOR=false
+CHILD_PID=""     # outil en cours (arrêté par on_interrupt : il ignore SIGINT en arrière-plan)
+
+# Lance "$@" en arrière-plan, sortie dans le fichier $1, et l'arrête si la
+# surveillance le demande (un xfs_fsr peut durer des heures). Retour : code de
+# l'outil. xfs_fsr et e4defrag tolèrent l'interruption (échange atomique).
+run_watched() {
+    local out="$1" rc=0; shift
+    "$@" > "$out" 2>&1 &
+    CHILD_PID=$!
+    while kill -0 "$CHILD_PID" 2>/dev/null; do
+        if monitor_should_stop; then
+            STOPPED_BY_MONITOR=true
+            kill -TERM "$CHILD_PID" 2>/dev/null || true
+            break
+        fi
+        sleep 1 & wait $! || true          # attente interruptible par les signaux
+    done
+    wait "$CHILD_PID" || rc=$?
+    CHILD_PID=""
+    return "$rc"
+}
 
 # Éligibilité au filtre intelligent. $1 = octets, $2 = extents.
 # Éligible si taille moyenne d'un extent < INTEL_THRESHOLD_MO (0 = toujours).
@@ -44,7 +65,7 @@ path_in_target() {
 # $5 = cible. Retour : 0 (traité ou ignoré), 130 (interruption Ctrl+C)
 defrag_file() {
     local path="$1" extents="$2" bytes="$3" fs="$4" target="$5"
-    local name age avail after rc output reason
+    local name age avail after rc output reason out
     local -a cmd=()
     name=$(basename -- "$path")
     (( ${#name} > 45 )) && name="${name:0:42}..."
@@ -75,9 +96,14 @@ defrag_file() {
         STAT_SIMULATED=$((STAT_SIMULATED + 1)); return 0
     fi
 
+    out=$(mktemp); TMP_FILES+=("$out")
     rc=0
-    output=$("${cmd[@]}" 2>&1) || rc=$?
-    (( rc > 128 )) && { echo "interrompu"; return "$EXIT_INTERRUPTED"; }
+    run_watched "$out" "${cmd[@]}" || rc=$?
+    output=$(<"$out"); rm -f -- "$out"
+    if is_true "$STOPPED_BY_MONITOR"; then
+        printf '%sArrêté par la surveillance : %s ⏹️%s\n' "$C_RED" "$(monitor_stop_reason)" "$C_RESET"
+        STAT_FAILED=$((STAT_FAILED + 1)); return 0
+    fi
 
     after=$(file_extents "$path")
     if is_uint "$after" && (( after < extents )); then
@@ -98,7 +124,7 @@ defrag_file() {
 # $2 = extents minimum, $3 = CSV, $4 = cible
 process_csv_rows() {
     local limit="$1" min_extents="$2" csv="$3" target="$4"
-    local fs bytes extents _h path count=0 rc
+    local fs bytes extents _h path count=0
     fs=$(fs_type "$target")
     exec 3< "$csv"
     read -r -u 3 _h || true                            # en-tête
@@ -114,10 +140,9 @@ process_csv_rows() {
             break
         fi
         monitor_status_line
-        rc=0
-        defrag_file "$path" "$extents" "$bytes" "$fs" "$target" || rc=$?
-        (( rc == EXIT_INTERRUPTED )) && exit "$EXIT_INTERRUPTED"
+        defrag_file "$path" "$extents" "$bytes" "$fs" "$target"
         count=$((count + 1))
+        is_true "$STOPPED_BY_MONITOR" && break
     done
     exec 3<&-
     if (( count == 0 )) && ! is_true "$STOPPED_BY_MONITOR"; then
@@ -137,7 +162,8 @@ process_selected_rows() {
         [[ -n "$line" ]] || { warn "Numéro hors classement : $num"; continue; }
         IFS=$'\t' read -r bytes extents _h path <<< "$line"
         monitor_should_stop && { STOPPED_BY_MONITOR=true; err "Arrêt demandé par la surveillance"; break; }
-        defrag_file "$path" "$extents" "$bytes" "$fs" "$target" || exit "$EXIT_INTERRUPTED"
+        defrag_file "$path" "$extents" "$bytes" "$fs" "$target"
+        is_true "$STOPPED_BY_MONITOR" && break
     done
 }
 
@@ -149,7 +175,16 @@ defrag_global_xfs() {
         log "[DRY-RUN] xfs_fsr -t $GLOBAL_FSR_TIMEOUT_SEC -v $dev"; return 0
     fi
     log "---   xfs_fsr global sur $dev (durée max ${GLOBAL_FSR_TIMEOUT_SEC}s, Ctrl+C pour arrêter)"
-    xfs_fsr -t "$GLOBAL_FSR_TIMEOUT_SEC" -v "$dev" 2>&1 \
-        | awk '/extents before/ { ok++ } /already fully/ { skip++ }
-               END { printf "\n   [xfs_fsr global] Défragmentés : %d | Déjà optimaux : %d\n", ok, skip }'
+    local out rc=0
+    out=$(mktemp); TMP_FILES+=("$out")
+    run_watched "$out" xfs_fsr -t "$GLOBAL_FSR_TIMEOUT_SEC" -v "$dev" || rc=$?
+    awk '/extents before/ { ok++ } /already fully/ { skip++ }
+         END { printf "\n   [xfs_fsr global] Défragmentés : %d | Déjà optimaux : %d\n", ok, skip }' "$out"
+    rm -f -- "$out"
+    if is_true "$STOPPED_BY_MONITOR"; then
+        err "xfs_fsr global arrêté par la surveillance : $(monitor_stop_reason)"
+    elif (( rc != 0 )); then
+        err "xfs_fsr global en échec (code $rc)"
+    fi
+    return 0
 }

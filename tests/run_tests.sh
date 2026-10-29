@@ -364,6 +364,39 @@ mkdir -p "$DF/scan"; printf 'x' > "$DF/scan/a"$'\n'"hors.txt"; printf 'x' > "$DF
 check "scan : chemin hors de la cible écarté du CSV" not grep -q 'hors.txt' "$DF/f.csv"
 rm -rf "$DF"; MIN_FILE_AGE_MIN=60 DRY_RUN=false
 
+echo "surveillance : arrêt d'un outil en cours"
+SV="$ROOT/.surv"; mkdir -p "$SV/bin" "$SV/cible"
+printf '#!/usr/bin/env bash\nexec sleep 20\n' > "$SV/bin/xfs_fsr"; chmod +x "$SV/bin/xfs_fsr"
+printf 'x' > "$SV/cible/f.mkv"; touch -d '2 days ago' "$SV/cible/f.mkv"
+MONITOR_DIR="$SV/mon"; mkdir -p "$MONITOR_DIR"; STOPPED_BY_MONITOR=false DRY_RUN=false
+( sleep 1; echo "DISK_TEMP:61C" > "$SV/mon/stop" ) &
+debut=$SECONDS
+PATH="$SV/bin:$PATH" defrag_file "$SV/cible/f.mkv" 5 1 xfs "$SV/cible" > "$SV/sortie" 2>&1
+check "fichier en cours : arrêté par la surveillance en moins de 10 s" test $((SECONDS - debut)) -lt 10
+check "fichier en cours : arrêt signalé" eq "$STOPPED_BY_MONITOR" true
+check "fichier en cours : arrêt expliqué" grep -q "surveillance" "$SV/sortie"
+rm -f "$SV/mon/stop"; STOPPED_BY_MONITOR=false
+( sleep 1; echo "DISK_TEMP:61C" > "$SV/mon/stop" ) &
+debut=$SECONDS
+# shellcheck disable=SC2317  # appelée par defrag_global_xfs
+fs_source() { echo /dev/faux; }
+PATH="$SV/bin:$PATH" defrag_global_xfs "$SV/cible" > "$SV/sortie" 2>&1
+# shellcheck source=../lib/common.sh
+source "$ROOT/lib/common.sh" 2>/dev/null   # restaure fs_source
+check "xfs_fsr global : arrêté par la surveillance en moins de 10 s" test $((SECONDS - debut)) -lt 10
+check "xfs_fsr global : arrêt signalé" eq "$STOPPED_BY_MONITOR" true
+# Arrêt (SIGTERM d'un orchestrateur, Ctrl+C) : l'outil, lancé en arrière-plan, doit
+# être arrêté aussi. SIGTERM ici : un job d'arrière-plan d'un script ignore SIGINT.
+printf '#!/usr/bin/env bash\necho $$ > %q\nexec sleep 20\n' "$SV/pid" > "$SV/bin/xfs_fsr"
+PATH="$SV/bin:$PATH" bash -c "source '$ROOT/AcmeFrag.sh'; load_modules; trap 'on_interrupt 130' INT; \
+    trap 'on_interrupt 143' TERM; MONITOR_DIR=''; defrag_file '$SV/cible/f.mkv' 5 1 xfs '$SV/cible'" > /dev/null 2>&1 &
+acme=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do [[ -s "$SV/pid" ]] && break; sleep 0.5; done
+kill -TERM "$acme"; wait "$acme"; rc_term=$?
+check "SIGTERM : code 143" eq "$rc_term" 143
+check "SIGTERM : outil en cours arrêté" not kill -0 "$(cat "$SV/pid")" 2>/dev/null
+rm -rf "$SV"; MONITOR_DIR="" STOPPED_BY_MONITOR=false
+
 echo "sécurité root (fichiers et dossiers)"
 MOI=$(id -u) MON_GID=$(id -g)
 SEC="$ROOT/.securite"; mkdir -p "$SEC/sain" "$SEC/ouvert"; chmod 755 "$ROOT" "$SEC" "$SEC/sain"
