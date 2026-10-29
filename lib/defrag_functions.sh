@@ -26,7 +26,10 @@ run_watched() {
             kill -TERM "$CHILD_PID" 2>/dev/null || true
             break
         fi
-        sleep 1 & wait $! || true          # attente interruptible par les signaux
+        # Attente interruptible par les signaux ; sleep sans le fd du verrou. L'outil,
+        # lui, le garde : s'il survit au script, aucune autre instance ne démarre.
+        if [[ -n "${LOCK_FD:-}" ]]; then sleep 1 {LOCK_FD}<&- & else sleep 1 & fi
+        wait $! || true
     done
     wait "$CHILD_PID" || rc=$?
     CHILD_PID=""
@@ -62,7 +65,7 @@ path_in_target() {
 }
 
 # Défragmente un fichier. $1 = chemin, $2 = extents (scan), $3 = octets, $4 = FS,
-# $5 = cible. Retour : 0 (traité ou ignoré), 130 (interruption Ctrl+C)
+# $5 = cible. Retour : 0 (traité, ignoré ou en échec : voir les compteurs STAT_*)
 defrag_file() {
     local path="$1" extents="$2" bytes="$3" fs="$4" target="$5"
     local name age avail after rc output reason out
@@ -113,7 +116,7 @@ defrag_file() {
         printf '%sAucun gain possible (%s extents) ✅%s\n' "$C_BLUE" "${after:-$extents}" "$C_RESET"
         STAT_ALREADY=$((STAT_ALREADY + 1))
     else
-        reason=$(printf '%s' "$output" | tr '\n' ' ' | tr -s ' ' | cut -c1-70)
+        reason=$(printable "$(printf '%s' "$output" | tr '\n' ' ' | tr -s ' ' | cut -c1-70)")
         printf '%sÉchec (code %s) : %s ❌%s\n' "$C_RED" "$rc" "${reason:-sans message}" "$C_RESET"
         STAT_FAILED=$((STAT_FAILED + 1))
     fi

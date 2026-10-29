@@ -37,41 +37,41 @@ _scan_extents() {
 }
 
 # "extents<TAB>chemin" (stdin, sortie de _scan_extents) -> lignes CSV sans en-tête.
-# Le total « #TOTAL » est écrit dans le fichier $2. Écartés : chemin hors de la
+# Le total « #TOTAL » est écrit dans le fichier $2 ; $3 = fichier de travail. Écartés : chemin hors de la
 # cible $1 (morceau d'un nom à retour à la ligne, relatif au dossier courant) ou
 # contenant une tabulation (non représentable). Tailles par lots (xargs stat) :
 # pas de processus par fichier.
 _scan_rows() {
-    local target="${1%/}/" total_file="$2" list
-    list=$(mktemp); TMP_FILES+=("$list")
-    awk -F '\t' -v pre="$target" -v tf="$total_file" '
-        $1 == "#TOTAL" { print $2 > tf; next }
-        NF == 2 && index($2, pre) == 1' > "$list"
+    local list="$3"
+    # Chemins par l'environnement : awk -v interpréterait les « \ » d'un nom
+    PRE="${1%/}/" TF="$2" awk -F '\t' '
+        $1 == "#TOTAL" { print $2 > ENVIRON["TF"]; next }
+        NF == 2 && index($2, ENVIRON["PRE"]) == 1' > "$list"
     cut -f2- "$list" | tr '\n' '\0' | { xargs -0 -r stat -c $'%s\t%n' -- 2>/dev/null || true; } \
         | LC_ALL=C awk -F '\t' -v OFS='\t' "$AWK_HUMAN"'
             NR == FNR { size[$2] = $1; next }
             ($2 in size) { print size[$2], $1, human(size[$2]), $2 }' - "$list"
-    rm -f -- "$list"
 }
 
 # Scan complet -> CSV. $1 = cible, $2 = fichier CSV
 scan_filesystem() {
-    local target="$1" csv="$2" tmp total_file
+    local target="$1" csv="$2" tmp total_file list
     title "🔍 Analyse de la fragmentation ($(fs_type "$target")) sur : $target"
     log "---   ⏳ Peut prendre plusieurs minutes selon le nombre de fichiers…"
 
     tmp=$(mktemp "${csv}.XXXXXX")
     total_file=$(mktemp "${csv}.total.XXXXXX")
-    TMP_FILES+=("$tmp" "$total_file")
+    list=$(mktemp "${csv}.list.XXXXXX")       # créé ici : connu de cleanup après un Ctrl+C
+    TMP_FILES+=("$tmp" "$total_file" "$list")
     {
         printf '%s\n' "$CSV_HEADER"
-        _scan_extents "$target" | _scan_rows "$target" "$total_file" | sort -t $'\t' -k2,2rn -k1,1rn
+        _scan_extents "$target" | _scan_rows "$target" "$total_file" "$list" | sort -t $'\t' -k2,2rn -k1,1rn
     } > "$tmp"
     mv -f -- "$tmp" "$csv"      # écriture atomique : jamais de rapport à moitié écrit
 
     ok "Scan terminé : $(csv_count "$csv") fichier(s) fragmenté(s) sur $(cat "$total_file" 2>/dev/null || echo '?') analysé(s)"
     log "      Rapport : $csv"
-    rm -f -- "$total_file"
+    rm -f -- "$total_file" "$list"
 }
 
 # Nombre de lignes de données du CSV

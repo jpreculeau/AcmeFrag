@@ -129,7 +129,28 @@ test_fs() {
     chmod o-w "$WORK/reports"
     check "$fs : dossier de rapports modifiable par tous refusé (code 8)" test "$rc" -eq 8
     check "$fs : --sante : dossier de rapports modifiable par tous refusé (code 8)" test "$rc2" -eq 8
+    # common.sh modifiable par tous : refusé AVANT d'être exécuté (il définit les contrôles)
+    cp "$WORK/acmefrag/lib/common.sh" "$WORK/common.sh.orig"
+    printf 'touch %q\n' "$WORK/pwned" >> "$WORK/acmefrag/lib/common.sh"; chmod o+w "$WORK/acmefrag/lib/common.sh"
+    rc=0; run_acme "$MNT" --dry-run --no-monitor --force-ssd || rc=$?
+    cp "$WORK/common.sh.orig" "$WORK/acmefrag/lib/common.sh"; chmod o-w "$WORK/acmefrag/lib/common.sh"
+    check "$fs : common.sh modifiable par tous : refusé (code 8)" test "$rc" -eq 8
+    check "$fs : common.sh modifiable par tous : jamais exécuté" test ! -e "$WORK/pwned"
     if [[ -n "${SUDO_UID:-}" ]]; then   # lancé par sudo : rapports rendus à l'utilisateur
+        # Clone neuf : dossier de rapports créé au nom de l'utilisateur sudo
+        mkdir -p "$WORK/perso"; chown "$SUDO_UID" "$WORK/perso"
+        env -u TERM REPORT_DIR="$WORK/perso/reports" "$ACME" "$MNT" --dry-run --no-monitor --force-ssd </dev/null >/dev/null 2>&1 || true
+        check "$fs : dossier de rapports neuf créé au nom de l'utilisateur sudo" \
+            test "$(stat -c %u "$WORK/perso/reports" 2>/dev/null)" = "$SUDO_UID"
+        check "$fs : rapport d'un dossier neuf rendu à l'utilisateur sudo" \
+            test "$(stat -c %u "$WORK/perso/reports/fragmentation_$(date +%Y-%m-%d).csv" 2>/dev/null)" = "$SUDO_UID"
+        # Installation appartenant à root : l'utilisateur sudo n'est plus de confiance
+        local own; own=$(stat -c %u:%g "$WORK/acmefrag")
+        chown -R 0:0 "$WORK/acmefrag"
+        rc=0; env -u TERM REPORT_DIR="$WORK/perso/reports" "$ACME" "$MNT" --dry-run --no-monitor --force-ssd </dev/null >/dev/null 2>&1 || rc=$?
+        chown -R "$own" "$WORK/acmefrag"
+        check "$fs : installation root + rapports de l'utilisateur sudo : refusé (code 8)" test "$rc" -eq 8
+        rm -rf "$WORK/perso"
         chown "$SUDO_UID" "$WORK/reports"
         run_acme "$MNT" --dry-run --no-monitor --force-ssd || true
         check "$fs : rapports rendus à l'utilisateur sudo" \

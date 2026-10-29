@@ -380,6 +380,10 @@ check "espace libre insuffisant : outil jamais lancé" eq "$(cat "$DF/appels")" 
 check "espace libre insuffisant : compté en échec" eq "$STAT_FAILED" 1
 # shellcheck source=../lib/common.sh
 source "$ROOT/lib/common.sh" 2>/dev/null   # restaure fs_avail_bytes
+# shellcheck disable=SC2016  # développé par le faux outil
+printf '#!/usr/bin/env bash\nprintf "\\033]0;PIRATE\\007 erreur sur %%s\\n" "$1"; exit 1\n' > "$DF/bin/e4defrag"; chmod +x "$DF/bin/e4defrag"
+PATH="$DF/bin:$PATH" defrag_file "$DF/cible/vieux.mkv" 1 1 ext4 "$DF/cible" > "$DF/sortie" 2>&1
+check "échec de l'outil : raison affichée sans séquence de terminal" not grep -q $'\e' "$DF/sortie"
 # Scan : un nom à retour à la ligne ne doit pas faire entrer un chemin relatif au CSV
 # shellcheck disable=SC2016  # $f est développé par le faux filefrag
 printf '#!/usr/bin/env bash\nfor f; do printf "%%s: 5 extents found\\n" "$f"; done\n' > "$DF/bin/filefrag"; chmod +x "$DF/bin/filefrag"
@@ -399,6 +403,9 @@ check "scan : CSV trié (extents puis taille), tailles lisibles, exclusions" eq 
 check "scan : nombre de fichiers analysés" grep -q "3 fichier(s) fragmenté(s) sur 3 analysé(s)" "$DF/scan.out"
 check "scan : au plus 2 appels à stat pour 3 fichiers (par lots)" test "$(wc -l < "$DF/stat.n")" -le 2
 check "scan : aucun appel à numfmt" eq "$(wc -l < "$DF/numfmt.n")" 0
+mkdir -p "$DF/a\\b"; printf 'x' > "$DF/a\\b/f.mkv"
+PATH="$DF/bin:$PATH" scan_filesystem "$DF/a\\b" "$DF/h.csv" > /dev/null 2>&1
+check "scan : cible contenant « \\ » analysée" grep -q 'f.mkv' "$DF/h.csv"
 rm -rf "$DF"; MIN_FILE_AGE_MIN=60 DRY_RUN=false
 
 echo "surveillance : arrêt d'un outil en cours"
@@ -436,6 +443,7 @@ rm -rf "$SV"; MONITOR_DIR="" STOPPED_BY_MONITOR=false
 
 echo "sécurité root (fichiers et dossiers)"
 MOI=$(id -u) MON_GID=$(id -g)
+SEC_TMP=$(mktemp -d /tmp/acmefrag-test.XXXXXX); chmod 755 "$SEC_TMP"; : > "$SEC_TMP/f"; chmod 644 "$SEC_TMP/f"
 SEC="$ROOT/.securite"; mkdir -p "$SEC/sain" "$SEC/ouvert"; chmod 755 "$ROOT" "$SEC" "$SEC/sain"
 : > "$SEC/sain/f.sh"; chmod 644 "$SEC/sain/f.sh"
 check "chemin à soi, propriétaire autorisé -> sûr" path_trusted "$SEC/sain/f.sh" "$MOI" "$MON_GID"
@@ -448,7 +456,13 @@ check "dossier parent inscriptible par tous -> refusé" not path_trusted "$SEC/o
 ln -s "$SEC/sain" "$SEC/lien"
 check "lien symbolique sur le chemin -> refusé" not path_trusted "$SEC/lien/f.sh" "$MOI"
 check "chemin relatif -> refusé" not path_trusted "sain/f.sh" "$MOI"
-check "dossier « sticky » de root (/tmp) -> sûr" path_trusted /tmp
+check "dossier « sticky » de root (/tmp) comme parent -> sûr" path_trusted "$SEC_TMP/f" "$MOI" "$MON_GID"
+check "dossier « sticky » de root comme dossier final -> refusé" not path_trusted /tmp "$MOI" "$MON_GID"
+SUDO_UID=$MOI SUDO_GID=$MON_GID
+check "confiance : clone de l'utilisateur sudo -> lui et son groupe" eq "$(trusted_owner)" "$MOI $MON_GID"
+SUDO_UID=$((MOI + 1))
+check "confiance : AcmeFrag n'appartient pas à l'utilisateur sudo -> root seul" eq "$(trusted_owner)" "0 0"
+unset SUDO_UID SUDO_GID
 # Verrou : ne jamais ouvrir (ni tronquer) un fichier posé dans le dossier des rapports
 echo "PRÉCIEUX" > "$SEC/victime"; mkdir -p "$SEC/rep"; ln -s "$SEC/victime" "$SEC/rep/.acmefrag.lock"
 check "verrou : lien symbolique posé -> cible intacte" bash -c "source '$ROOT/AcmeFrag.sh'; load_modules; REPORT_DIR='$SEC/rep'; acquire_lock; [[ \$(cat '$SEC/victime') == PRÉCIEUX ]]"
@@ -465,11 +479,15 @@ check "chown : jamais récursif" not grep -q -- '-R' "$SEC/chown.log"
 # Scan interrompu : aucun fichier temporaire laissé à côté du CSV
 mkdir -p "$SEC/scan" "$SEC/scanrep" "$SEC/bin2"
 printf 'x' > "$SEC/scan/a"
-# shellcheck disable=SC2016  # $ACME_TEST_PID est développé par le faux filefrag
-printf '#!/usr/bin/env bash\nkill -INT "$ACME_TEST_PID"; sleep 2\n' > "$SEC/bin2/filefrag"; chmod +x "$SEC/bin2/filefrag"
-PATH="$SEC/bin2:$PATH" bash -c "source '$ROOT/AcmeFrag.sh'; load_modules; export ACME_TEST_PID=\$\$; trap cleanup EXIT; trap 'exit 130' INT; REPORT_DIR='$SEC/scanrep'; scan_filesystem '$SEC/scan' '$SEC/scanrep/fragmentation_x.csv'" >/dev/null 2>&1
+# Ctrl+C : SIGINT à tout le groupe de processus (pipeline compris), comme au terminal
+TEMOIN="$SEC/temoin"; : > "$TEMOIN"; sleep 1
+# shellcheck disable=SC2016  # développé par le faux outil
+printf '#!/usr/bin/env bash\nfor f; do printf "%%s: 5 extents found\\n" "$f"; done\nkill -INT -- "-$ACME_TEST_PID"; sleep 2\n' > "$SEC/bin2/filefrag"; chmod +x "$SEC/bin2/filefrag"
+PATH="$SEC/bin2:$PATH" setsid bash -c "source '$ROOT/AcmeFrag.sh'; load_modules; export ACME_TEST_PID=\$\$; trap cleanup EXIT; trap 'exit 130' INT; REPORT_DIR='$SEC/scanrep'; scan_filesystem '$SEC/scan' '$SEC/scanrep/fragmentation_x.csv'" >/dev/null 2>&1
 check "scan interrompu : aucun temporaire laissé" eq "$(ls -A "$SEC/scanrep")" ""
-rm -rf "$SEC"
+check "scan interrompu : aucun temporaire laissé dans TMPDIR" \
+    eq "$(find "${TMPDIR:-/tmp}" -maxdepth 1 -type f -name 'tmp.*' -newer "$TEMOIN" 2>/dev/null)" ""
+rm -rf "$SEC" "$SEC_TMP"
 
 echo "mineurs : affichage, entiers, codes, quota, configuration"
 check "nom avec séquence de terminal : neutralisé à l'affichage" eq "$(printable $'film\e]0;PIRATE\a\e[2J.mkv')" "film?]0;PIRATE??[2J.mkv"

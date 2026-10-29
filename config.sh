@@ -14,14 +14,10 @@
 
 # --- Surcharges optionnelles (chargées AVANT les défauts) --------------------
 # ACMEFRAG_SYSTEM_CONF : autre fichier système (tests : fichier absent)
-# En root, un fichier qu'un autre compte peut modifier n'est pas chargé : son code
-# serait exécuté avec tous les droits.
+# (En root, AcmeFrag.sh a vérifié avant qu'aucun autre compte ne peut les modifier.)
 for _conf in "${ACMEFRAG_SYSTEM_CONF:-/etc/acmefrag.conf}" "${ACMEFRAG_HOME}/local.conf"; do
-    [[ -r "$_conf" ]] || continue
-    root_may_use "$_conf" || die "$EXIT_UNTRUSTED" \
-        "Refus : $_conf est modifiable par un autre compte que root ou l'utilisateur sudo."
     # shellcheck source=/dev/null
-    source "$_conf"
+    [[ -r "$_conf" ]] && source "$_conf"
 done
 unset _conf
 

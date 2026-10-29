@@ -46,9 +46,9 @@ Le script demande lui-même les droits root (`sudo`) au lancement.
 
 ### 🔐 Sécurité
 
-AcmeFrag travaille en root : son code, sa configuration et son dossier de rapports doivent être hors d'atteinte des autres comptes. En root, il refuse (code `8`) tout fichier ou dossier — et chacun de ses parents — qui n'appartient ni à root ni à l'utilisateur qui a lancé `sudo`, qui est un lien symbolique, ou qui est inscriptible par un autre groupe que celui de root ou de cet utilisateur.
+AcmeFrag travaille en root : son code, sa configuration et son dossier de rapports doivent être hors d'atteinte des autres comptes. En root, il refuse (code `8`) tout fichier ou dossier — et chacun de ses parents — qui n'appartient pas à un compte de confiance, qui est un lien symbolique, ou qui est inscriptible par un autre groupe que celui de ce compte (ou par tous, sauf un dossier parent « sticky » de root comme `/tmp`). Les comptes de confiance sont root et, **si AcmeFrag lui appartient**, l'utilisateur qui a lancé `sudo`. Le contrôle de `AcmeFrag.sh` lui-même vient forcément après son lancement : c'est au lanceur (cron, sudoers) de garantir ce fichier.
 
-- **Lancement par `sudo` depuis votre clone** (cas ci-dessus) : accepté, vous pourriez de toute façon tout faire en root.
+- **Lancement par `sudo` depuis votre clone** (cas ci-dessus) : accepté, vous pourriez de toute façon tout faire en root. Un dossier de rapports neuf est créé à votre nom, et les rapports vous sont rendus.
 - **Cron root, ou règle sudoers `NOPASSWD` limitée à AcmeFrag** : installez une copie qui appartient à root, sinon n'importe quel processus de votre compte pourrait modifier le code exécuté en root :
 
 ```bash
@@ -58,7 +58,9 @@ sudo chown -R root:root /usr/local/lib/acmefrag && sudo chmod -R go-w /usr/local
 sudo ln -sf /usr/local/lib/acmefrag/AcmeFrag.sh /usr/local/bin/acmefrag
 ```
 
-Les rapports sont alors dans `/usr/local/lib/acmefrag/reports` (ou `REPORT_DIR` dans `/etc/acmefrag.conf`, par exemple `/var/lib/acmefrag`).
+Les rapports sont alors dans `/usr/local/lib/acmefrag/reports` (ou `REPORT_DIR` dans `/etc/acmefrag.conf`, par exemple `/var/lib/acmefrag`) : ils doivent appartenir à root, l'utilisateur sudo n'étant plus de confiance.
+
+Limite connue : un compte qui peut écrire dans la cible (client BitTorrent, synchronisation) peut encore remplacer un fichier par un lien symbolique dans l'instant qui sépare le dernier contrôle du lancement de `xfs_fsr` ou `e4defrag`. Ces outils ne modifient pas le contenu des fichiers qu'ils traitent.
 
 ---
 

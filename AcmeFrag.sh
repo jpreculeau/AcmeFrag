@@ -22,6 +22,63 @@ ACMEFRAG_HOME="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 readonly ACMEFRAG_HOME
 readonly ACMEFRAG_SELF="${ACMEFRAG_HOME}/AcmeFrag.sh"
 
+# ==============================================================================
+# CONFIANCE (le script tourne en root) — définie ici, avant tout chargement : un
+# module modifiable par un autre compte ne doit jamais être exécuté, et c'est ce
+# fichier qui en décide. Le contrôle de AcmeFrag.sh lui-même est forcément après
+# coup : au lanceur (sudoers, cron) de garantir le point d'entrée.
+# ==============================================================================
+# Chemin $1 sûr pour root : lui et chacun de ses parents jusqu'à / ne sont pas
+# des liens symboliques, appartiennent à root ou à l'uid $2, ne sont inscriptibles
+# par le groupe que si ce groupe est root ou le gid $3, et par les autres que s'il
+# s'agit d'un parent « sticky » de root (/tmp), jamais du chemin lui-même. Sinon
+# un autre compte pourrait y substituer un fichier.
+path_trusted() {
+    local p="$1" uid_ok="${2:-0}" gid_ok="${3:-0}" uid gid mode final=true
+    [[ "$p" == /* ]] || return 1
+    while :; do
+        [[ -L "$p" ]] && return 1
+        read -r uid gid mode < <(stat -c '%u %g %a' -- "$p" 2>/dev/null) || return 1
+        [[ "$uid" == 0 || "$uid" == "$uid_ok" ]] || return 1
+        if (( 8#$mode & 8#020 )) && [[ "$gid" != 0 && "$gid" != "$gid_ok" ]]; then return 1; fi
+        if (( 8#$mode & 8#002 )) && { $final || ! (( 8#$mode & 8#1000 )) || [[ "$uid" != 0 ]]; }; then
+            return 1
+        fi
+        [[ "$p" == / ]] && return 0
+        p="${p%/*}"; p="${p:-/}"; final=false
+    done
+}
+
+# Comptes de confiance en root, "uid gid" : l'utilisateur sudo et son groupe
+# seulement si AcmeFrag lui appartient (clone personnel lancé par sudo : il
+# pourrait de toute façon tout faire en root) ; sinon root seul (installation
+# root, cron, règle sudoers limitée à AcmeFrag).
+trusted_owner() {
+    local gid
+    if [[ "${SUDO_UID:-}" =~ ^[0-9]+$ && "$(stat -c %u -- "$ACMEFRAG_SELF" 2>/dev/null)" == "$SUDO_UID" ]]; then
+        gid="${SUDO_GID:-}"; [[ "$gid" =~ ^[0-9]+$ ]] || gid=0
+        printf '%s %s\n' "$SUDO_UID" "$gid"
+    else
+        printf '0 0\n'
+    fi
+}
+
+# Root peut-il charger, lire ou écrire $1 sans risque ? Hors root : toujours.
+root_may_use() {
+    (( EUID == 0 )) || return 0
+    local uid gid
+    read -r uid gid < <(trusted_owner)
+    path_trusted "$1" "$uid" "$gid"
+}
+
+for _f in "$ACMEFRAG_SELF" "${ACMEFRAG_HOME}/lib/common.sh"; do
+    root_may_use "$_f" || {
+        printf '   ❌ Refus : %s est modifiable par un autre compte que root ou l'"'"'utilisateur sudo (voir README, « Sécurité »).\n' "$_f" >&2
+        exit 8   # EXIT_UNTRUSTED (lib/common.sh, pas encore chargé)
+    }
+done
+unset _f
+
 # shellcheck source=lib/common.sh
 source "${ACMEFRAG_HOME}/lib/common.sh"
 
@@ -230,7 +287,12 @@ start_log() {
 # ne peut modifier : il serait exécuté avec tous les droits.
 load_modules() {
     local m f
-    for f in "$ACMEFRAG_SELF" "${ACMEFRAG_HOME}/config.sh" "${ACMEFRAG_HOME}"/lib/*.sh; do
+    local -a files=("${ACMEFRAG_HOME}/config.sh" "${ACMEFRAG_HOME}"/lib/*.sh)
+    # Configuration sourcée par config.sh, si elle existe
+    for f in "${ACMEFRAG_SYSTEM_CONF:-/etc/acmefrag.conf}" "${ACMEFRAG_HOME}/local.conf"; do
+        [[ -e "$f" ]] && files+=("$f")
+    done
+    for f in "${files[@]}"; do
         root_may_use "$f" || die "$EXIT_UNTRUSTED" \
             "Refus : $f est modifiable par un autre compte que root ou l'utilisateur sudo (voir README, « Sécurité »)."
     done
@@ -278,10 +340,24 @@ resolve_target() {
 
 # Dossier des rapports, créé au besoin ; refusé si un autre compte peut y
 # substituer des fichiers (root y écrit : verrou, journal, CSV, historique).
+# L'ancêtre existant est contrôlé AVANT de créer quoi que ce soit ; dans un
+# dossier de l'utilisateur sudo, le dossier neuf lui est donné (ses rapports
+# lui seront rendus).
 require_report_dir() {
-    mkdir -p -- "$REPORT_DIR"
-    root_may_use "$REPORT_DIR" || die "$EXIT_UNTRUSTED" \
-        "Dossier de rapports refusé : $REPORT_DIR est modifiable par un autre compte que root ou l'utilisateur sudo."
+    local d="$REPORT_DIR" parent="${REPORT_DIR%/*}"
+    local msg="Dossier de rapports refusé : %s est modifiable par un autre compte que root ou l'utilisateur sudo."
+    while [[ ! -e "$d" ]]; do d="${d%/*}"; d="${d:-/}"; done
+    # shellcheck disable=SC2059
+    root_may_use "$d" || die "$EXIT_UNTRUSTED" "$(printf "$msg" "$d")"
+    if [[ ! -e "$REPORT_DIR" ]]; then
+        if is_uint "${SUDO_UID:-}" && [[ -d "${parent:-/}" && "$(stat -c %u -- "${parent:-/}")" == "$SUDO_UID" ]]; then
+            install -d -m 0755 -o "$SUDO_UID" -g "${SUDO_GID:-$SUDO_UID}" -- "$REPORT_DIR"
+        else
+            mkdir -p -- "$REPORT_DIR"
+        fi
+    fi
+    # shellcheck disable=SC2059
+    root_may_use "$REPORT_DIR" || die "$EXIT_UNTRUSTED" "$(printf "$msg" "$REPORT_DIR")"
 }
 
 main() {
