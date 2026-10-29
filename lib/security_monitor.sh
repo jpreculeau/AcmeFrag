@@ -29,6 +29,21 @@ _system_temp() {
     is_uint "$raw" && echo $((raw / 1000)) || echo NA
 }
 
+# Alertes pour un relevé : $1 secteurs réalloués, $2 valeur initiale, $3 température
+# disque, $4 température système (NA si inconnue). Affiche les alertes séparées par
+# des espaces (vide si aucune).
+_monitor_alerts() {
+    local bad="$1" initial="$2" temp="$3" sys="$4" drift alerts=""
+    if is_uint "$bad" && is_uint "$initial"; then
+        drift=$((bad - initial))
+        (( bad >= SMART_BAD_SECTOR_THRESHOLD )) && alerts+="BAD_SECTORS:${bad} "
+        (( drift >= SMART_BAD_SECTOR_DRIFT_THRESHOLD )) && alerts+="BAD_DRIFT:+${drift} "
+    fi
+    is_uint "$temp" && (( temp >= DISK_TEMP_THRESHOLD_C )) && alerts+="DISK_TEMP:${temp}C "
+    is_uint "$sys" && (( sys >= SYSTEM_TEMP_THRESHOLD_C )) && alerts+="SYS_TEMP:${sys}C "
+    printf '%s\n' "${alerts% }"
+}
+
 # Boucle de surveillance (exécutée en arrière-plan)
 _monitor_loop() {
     local dev="$1" args="$2" smart="$3" parent="$4"
@@ -37,17 +52,11 @@ _monitor_loop() {
     if [[ -n "${LOCK_FD:-}" ]]; then exec {LOCK_FD}>&-; fi
     [[ "$smart" == true ]] && read -r initial_bad _ < <(_smart_read "$dev" "$args")
     while kill -0 "$parent" 2>/dev/null; do
-        bad=NA temp=NA drift=0 alerts=""
+        bad=NA temp=NA drift=0
         [[ "$smart" == true ]] && read -r bad temp < <(_smart_read "$dev" "$args")
         sys=$(_system_temp)
-        if is_uint "$bad" && is_uint "$initial_bad"; then
-            drift=$((bad - initial_bad))
-            (( bad >= SMART_BAD_SECTOR_THRESHOLD )) && alerts+="BAD_SECTORS:${bad} "
-            (( drift >= SMART_BAD_SECTOR_DRIFT_THRESHOLD )) && alerts+="BAD_DRIFT:+${drift} "
-        fi
-        is_uint "$temp" && (( temp >= DISK_TEMP_THRESHOLD_C )) && alerts+="DISK_TEMP:${temp}C "
-        is_uint "$sys" && (( sys >= SYSTEM_TEMP_THRESHOLD_C )) && alerts+="SYS_TEMP:${sys}C "
-        alerts="${alerts% }"
+        is_uint "$bad" && is_uint "$initial_bad" && drift=$((bad - initial_bad))
+        alerts=$(_monitor_alerts "$bad" "$initial_bad" "$temp" "$sys")
         # Écriture atomique : le lecteur ne voit jamais un fichier à moitié écrit
         printf 'bad_sectors=%s\nbad_drift=%s\ndisk_temp=%s\nsystem_temp=%s\nalerts=%s\n' \
             "$bad" "$drift" "$temp" "$sys" "${alerts:-none}" > "$MONITOR_DIR/status.tmp"

@@ -66,7 +66,8 @@ check "-s sans entier -> code 2"  bash -c "'$ROOT/AcmeFrag.sh' -s abc >/dev/null
 check "deux cibles -> code 2"     bash -c "'$ROOT/AcmeFrag.sh' /a /b >/dev/null 2>&1; [[ \$? -eq 2 ]]"
 check "auto sans cible ni DEFAULT_TARGET -> code 2" bash -c "DEFAULT_TARGET= '$ROOT/AcmeFrag.sh' --auto --dry-run --no-qos </dev/null >/dev/null 2>&1; [[ \$? -eq 2 ]]"
 check "config par défaut sans chemin personnel" bash -c "! grep -q '^: \"\${DEFAULT_TARGET:=/' '$ROOT/config.sh'"
-check "--help -> code 0"          bash -c "'$ROOT/AcmeFrag.sh' --help | grep -q ACMEFRAG"
+check "--help -> code 0"          bash -c "'$ROOT/AcmeFrag.sh' --help >/dev/null"
+check "--help -> aide affichée"   bash -c "'$ROOT/AcmeFrag.sh' --help | grep -q ACMEFRAG"
 CLI_MODE=""
 check "hors terminal -> mode auto" eq "$(resolve_mode < /dev/null)" auto
 
@@ -77,10 +78,24 @@ check "exclusions find" eq "${ex[0]} ${ex[1]} ${ex[2]}" "! -name *.tmp"
 MONITOR_DIR=$(mktemp -d)
 printf 'bad_sectors=3\nbad_drift=1\ndisk_temp=41\nsystem_temp=55\nalerts=none\n' > "$MONITOR_DIR/status"
 check "ligne monitor" eq "$(monitor_status_line)" "   🔒 MONITOR: bad_sectors=3 bad_drift=+1 disk_temp=41°C system_temp=55°C alerts=none"
-check "pas d'arrêt sans fichier stop" bash -c "! [[ -f '$MONITOR_DIR/stop' ]]"
+check "pas d'arrêt sans fichier stop" not monitor_should_stop
 echo "BAD" > "$MONITOR_DIR/stop"
 check "arrêt demandé" monitor_should_stop
 rm -rf "$MONITOR_DIR"; MONITOR_DIR=""
+SMART_BAD_SECTOR_THRESHOLD=50 SMART_BAD_SECTOR_DRIFT_THRESHOLD=5 DISK_TEMP_THRESHOLD_C=60 SYSTEM_TEMP_THRESHOLD_C=85
+check "surveillance : valeurs saines -> aucune alerte" eq "$(_monitor_alerts 10 10 40 50)" ""
+check "surveillance : secteurs au seuil -> alerte" eq "$(_monitor_alerts 50 48 40 50)" "BAD_SECTORS:50"
+check "surveillance : dérive au seuil -> alerte" eq "$(_monitor_alerts 15 10 40 50)" "BAD_DRIFT:+5"
+check "surveillance : température disque au seuil -> alerte" eq "$(_monitor_alerts 10 10 60 50)" "DISK_TEMP:60C"
+check "surveillance : température système au seuil -> alerte" eq "$(_monitor_alerts 10 10 40 85)" "SYS_TEMP:85C"
+check "surveillance : valeurs absentes (NA) -> aucune alerte" eq "$(_monitor_alerts NA NA NA NA)" ""
+check "surveillance : alertes cumulées" eq "$(_monitor_alerts 60 50 61 90)" "BAD_SECTORS:60 BAD_DRIFT:+10 DISK_TEMP:61C SYS_TEMP:90C"
+ROT=$(mktemp -d "$ROOT/rot.XXXXXX")
+touch -d '40 days ago' "$ROT/fragmentation_2026-01-01.csv" "$ROT/acmefrag_2026-01-01.log" "$ROT/autre.txt"
+touch "$ROT/fragmentation_recent.csv"
+REPORT_DIR="$ROT" REPORT_MAX_AGE_DAYS=30 clean_old_reports >/dev/null
+check "rotation : vieux rapports et journaux supprimés, le reste gardé" eq "$(find "$ROT" -type f -printf '%f\n' | sort | tr '\n' ' ')" "autre.txt fragmentation_recent.csv "
+rm -rf "$ROT"
 
 echo "santé du disque (SMART)"
 FIX="$ROOT/tests/fixtures/smartctl_ata.txt"
