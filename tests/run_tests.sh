@@ -9,6 +9,12 @@ ROOT=$(mktemp -d)
 trap 'rm -rf "$ROOT"' EXIT
 tar -C "$SOURCE" --exclude=./.git --exclude=./local.conf --exclude=./reports -cf - . | tar -C "$ROOT" -xf -
 export ACMEFRAG_SYSTEM_CONF=/nonexistent LC_ALL=C.UTF-8
+# Faux sudo en tête du PATH : un lancement qui atteindrait `exec sudo` ne doit
+# jamais devenir root (sudo effacerait ACMEFRAG_SYSTEM_CONF). Appels notés.
+SUDO_LOG="$ROOT/.faux-sudo/appels"; mkdir -p "$ROOT/.faux-sudo"; : > "$SUDO_LOG"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> %q\nexit 97\n' "$SUDO_LOG" > "$ROOT/.faux-sudo/sudo"
+chmod +x "$ROOT/.faux-sudo/sudo"
+export PATH="$ROOT/.faux-sudo:$PATH"
 PASS=0 FAIL=0
 
 check() {  # check "description" commande...
@@ -261,6 +267,9 @@ check "SMART_GUARD_DAYS=0 refusé" bash -c "source '$ROOT/lib/common.sh'; ACMEFR
 check "SMART_GUARD_DAYS non numérique refusé" bash -c "source '$ROOT/lib/common.sh'; ACMEFRAG_HOME='$ROOT' SMART_GUARD_DAYS=x; source '$ROOT/config.sh'; ! validate_config 2>/dev/null"
 check "SMART_TEMP_ALERT_C non numérique refusé" bash -c "source '$ROOT/lib/common.sh'; ACMEFRAG_HOME='$ROOT' SMART_TEMP_ALERT_C=x; source '$ROOT/config.sh'; ! validate_config 2>/dev/null"
 rm -rf "$REPORT_DIR"
+
+echo "isolation"
+check "aucun appel à sudo pendant les tests" eq "$(cat "$SUDO_LOG")" ""
 
 printf '\n%d réussi(s), %d échec(s)\n' "$PASS" "$FAIL"
 (( FAIL == 0 ))

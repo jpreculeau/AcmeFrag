@@ -4,11 +4,16 @@
 # Usage : sudo tests/integration.sh [xfs] [ext4]
 set -Eeuo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ACME="$ROOT/AcmeFrag.sh"
+SOURCE="$(cd "$(dirname "$0")/.." && pwd)"
 (( EUID == 0 )) || { echo "root requis"; exit 1; }
 # IT_TMPDIR : dossier des images (éviter un /tmp en RAM sur petite machine)
 WORK=$(mktemp -d "${IT_TMPDIR:-/tmp}/acmefrag-it.XXXXXX")
+# Copie du dépôt sans local.conf ni rapports, /etc/acmefrag.conf ignoré (comme
+# run_tests.sh) : la configuration de la machine primerait sur celle du test.
+mkdir "$WORK/acmefrag"
+tar -C "$SOURCE" --exclude=./.git --exclude=./local.conf --exclude=./reports -cf - . | tar -C "$WORK/acmefrag" -xf -
+export ACMEFRAG_SYSTEM_CONF=/nonexistent
+ACME="$WORK/acmefrag/AcmeFrag.sh"
 PASS=0 FAIL=0
 MNT="" LOOP=""
 
@@ -102,6 +107,7 @@ test_fs() {
 
 # FS racine / non supporté : refus (code 3)
 rc=0; run_acme / --dry-run --no-monitor --force-ssd || rc=$?
+check "copie isolée : pas de local.conf de la machine" test ! -e "$(dirname "$ACME")/local.conf"
 check "racine refusée (code 3)" test "$rc" -eq 3
 rc=0; run_acme "$WORK/inexistant" --dry-run || rc=$?
 check "dossier inexistant refusé (code 3)" test "$rc" -eq 3
