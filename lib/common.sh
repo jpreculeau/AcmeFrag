@@ -49,8 +49,14 @@ is_true() { [[ "${1,,}" == "true" ]]; }
 # séquence de terminal ne doit atteindre ni l'écran de root ni le journal.
 printable() { printf '%s\n' "${1//[[:cntrl:]]/?}"; }
 
-# Taille lisible (octets -> "2.4G"). numfmt fait partie de coreutils.
-human_size() { numfmt --to=iec --format='%.1f' "$1" 2>/dev/null || printf '%sB' "$1"; }
+# Taille lisible (octets -> "2.4G", "7B"), en awk pour servir aussi au scan sans
+# un processus par fichier. Locale C : toujours un point décimal.
+readonly AWK_HUMAN='function human(b,   u, i) {
+    if (b < 1024) return b "B"
+    for (i = 0; b >= 1024 && i < 6; i++) b /= 1024
+    return sprintf("%.1f%s", b, substr("KMGTPE", i, 1))
+}'
+human_size() { LC_ALL=C awk "$AWK_HUMAN"' BEGIN { print human(ARGV[1]) }' "$1"; }
 
 # --- Confiance (le script tourne en root) -------------------------------------
 # Chemin $1 sûr pour root : lui et chacun de ses parents jusqu'à / ne sont pas

@@ -18,8 +18,8 @@ is_supported_fs() {
 # Outils nécessaires selon le FS ("xfs" ou "ext4")
 required_tools_for() {
     case "$1" in
-        xfs)  echo "filefrag findmnt lsblk flock numfmt xfs_fsr" ;;
-        ext4) echo "filefrag findmnt lsblk flock numfmt e4defrag" ;;
+        xfs)  echo "filefrag findmnt lsblk flock xfs_fsr" ;;
+        ext4) echo "filefrag findmnt lsblk flock e4defrag" ;;
     esac
 }
 

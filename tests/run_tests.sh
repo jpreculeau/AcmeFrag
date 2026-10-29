@@ -379,6 +379,19 @@ printf '#!/usr/bin/env bash\nfor f; do printf "%%s: 5 extents found\\n" "$f"; do
 mkdir -p "$DF/scan"; printf 'x' > "$DF/scan/a"$'\n'"hors.txt"; printf 'x' > "$DF/hors.txt"
 ( cd "$DF" && PATH="$DF/bin:$PATH" scan_filesystem "$DF/scan" "$DF/f.csv" >/dev/null 2>&1 )
 check "scan : chemin hors de la cible écarté du CSV" not grep -q 'hors.txt' "$DF/f.csv"
+# Scan : CSV attendu, et coût constant en processus (pas de stat ni numfmt par fichier)
+rm -rf "$DF/scan"; mkdir -p "$DF/scan/sous dossier"
+head -c 1536 /dev/zero > "$DF/scan/a.mkv"; head -c 3000000 /dev/zero > "$DF/scan/sous dossier/b c.mkv"
+printf 'x' > "$DF/scan/petit"; printf 'x' > "$DF/scan/x.part"
+for outil in stat numfmt; do
+    printf '#!/usr/bin/env bash\necho >> %q\nexec /usr/bin/%s "$@"\n' "$DF/$outil.n" "$outil" > "$DF/bin/$outil"; chmod +x "$DF/bin/$outil"
+done
+: > "$DF/stat.n"; : > "$DF/numfmt.n"
+PATH="$DF/bin:$PATH" scan_filesystem "$DF/scan" "$DF/g.csv" > "$DF/scan.out" 2>&1
+check "scan : CSV trié (extents puis taille), tailles lisibles, exclusions" eq "$(cat "$DF/g.csv")" "$CSV_HEADER"$'\n'"3000000"$'\t'"5"$'\t'"2.9M"$'\t'"$DF/scan/sous dossier/b c.mkv"$'\n'"1536"$'\t'"5"$'\t'"1.5K"$'\t'"$DF/scan/a.mkv"$'\n'"1"$'\t'"5"$'\t'"1B"$'\t'"$DF/scan/petit"
+check "scan : nombre de fichiers analysés" grep -q "3 fichier(s) fragmenté(s) sur 3 analysé(s)" "$DF/scan.out"
+check "scan : au plus 2 appels à stat pour 3 fichiers (par lots)" test "$(wc -l < "$DF/stat.n")" -le 2
+check "scan : aucun appel à numfmt" eq "$(wc -l < "$DF/numfmt.n")" 0
 rm -rf "$DF"; MIN_FILE_AGE_MIN=60 DRY_RUN=false
 
 echo "surveillance : arrêt d'un outil en cours"

@@ -36,9 +36,27 @@ _scan_extents() {
         | awk -F'\t' '{ total++ } $1 >= 2 { print } END { printf "#TOTAL\t%d\n", total }'
 }
 
+# "extents<TAB>chemin" (stdin, sortie de _scan_extents) -> lignes CSV sans en-tête.
+# Le total « #TOTAL » est écrit dans le fichier $2. Écartés : chemin hors de la
+# cible $1 (morceau d'un nom à retour à la ligne, relatif au dossier courant) ou
+# contenant une tabulation (non représentable). Tailles par lots (xargs stat) :
+# pas de processus par fichier.
+_scan_rows() {
+    local target="${1%/}/" total_file="$2" list
+    list=$(mktemp); TMP_FILES+=("$list")
+    awk -F '\t' -v pre="$target" -v tf="$total_file" '
+        $1 == "#TOTAL" { print $2 > tf; next }
+        NF == 2 && index($2, pre) == 1' > "$list"
+    cut -f2- "$list" | tr '\n' '\0' | { xargs -0 -r stat -c $'%s\t%n' -- 2>/dev/null || true; } \
+        | LC_ALL=C awk -F '\t' -v OFS='\t' "$AWK_HUMAN"'
+            NR == FNR { size[$2] = $1; next }
+            ($2 in size) { print size[$2], $1, human(size[$2]), $2 }' - "$list"
+    rm -f -- "$list"
+}
+
 # Scan complet -> CSV. $1 = cible, $2 = fichier CSV
 scan_filesystem() {
-    local target="$1" csv="$2" tmp total_file n path size
+    local target="$1" csv="$2" tmp total_file
     title "🔍 Analyse de la fragmentation ($(fs_type "$target")) sur : $target"
     log "---   ⏳ Peut prendre plusieurs minutes selon le nombre de fichiers…"
 
@@ -47,14 +65,7 @@ scan_filesystem() {
     TMP_FILES+=("$tmp" "$total_file")
     {
         printf '%s\n' "$CSV_HEADER"
-        while IFS=$'\t' read -r n path; do
-            if [[ "$n" == "#TOTAL" ]]; then printf '%s' "$path" > "$total_file"; continue; fi
-            # Chemin non représentable dans un CSV TAB (TAB dans le nom), ou hors de la
-            # cible (morceau d'un nom à retour à la ligne, relatif au dossier courant)
-            [[ "$path" == *$'\t'* || "$path" != "${target%/}"/* || ! -f "$path" ]] && continue
-            size=$(stat -c %s -- "$path" 2>/dev/null) || continue
-            printf '%s\t%s\t%s\t%s\n' "$size" "$n" "$(human_size "$size")" "$path"
-        done < <(_scan_extents "$target") | sort -t $'\t' -k2,2rn -k1,1rn
+        _scan_extents "$target" | _scan_rows "$target" "$total_file" | sort -t $'\t' -k2,2rn -k1,1rn
     } > "$tmp"
     mv -f -- "$tmp" "$csv"      # écriture atomique : jamais de rapport à moitié écrit
 
