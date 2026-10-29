@@ -476,17 +476,23 @@ PATH="$SEC/bin:$PATH" SUDO_UID=$((MOI + 1)) bash -c "source '$ROOT/AcmeFrag.sh';
 check "chown : dossier de rapports d'un autre compte que l'utilisateur sudo -> rien" eq "$(cat "$SEC/chown.log")" ""
 PATH="$SEC/bin:$PATH" SUDO_UID=$MOI bash -c "source '$ROOT/AcmeFrag.sh'; load_modules; REPORT_DIR='$SEC/rep'; cleanup"
 check "chown : jamais récursif" not grep -q -- '-R' "$SEC/chown.log"
+printf '#!/usr/bin/env bash\necho "$*" >> %q\n' "$SEC/find.log" > "$SEC/bin/find"; chmod +x "$SEC/bin/find"; : > "$SEC/find.log"
+PATH="$SEC/bin:$PATH" SUDO_UID=$MOI bash -c "source '$ROOT/AcmeFrag.sh'; load_modules; trusted_owner() { echo '0 0'; }; REPORT_DIR='$SEC/rep'; cleanup"
+check "chown : utilisateur sudo hors confiance (installation root) -> rien" eq "$(cat "$SEC/find.log")" ""
+rm -f "$SEC/bin/find"
+check "REPORT_DIR avec barre finale normalisé" bash -c "source '$ROOT/lib/common.sh'; ACMEFRAG_HOME='$ROOT' REPORT_DIR=/x/rapports/; source '$ROOT/config.sh'; validate_config && [[ \$REPORT_DIR == /x/rapports ]]"
+check "dossier « sticky » de root comme ancêtre à compléter -> sûr" path_trusted /tmp 0 0 parent
 # Scan interrompu : aucun fichier temporaire laissé à côté du CSV
 mkdir -p "$SEC/scan" "$SEC/scanrep" "$SEC/bin2"
 printf 'x' > "$SEC/scan/a"
 # Ctrl+C : SIGINT à tout le groupe de processus (pipeline compris), comme au terminal
-TEMOIN="$SEC/temoin"; : > "$TEMOIN"; sleep 1
+TEMOIN="$SEC/temoin"; : > "$TEMOIN"; mkdir -p "$SEC/tmp"
 # shellcheck disable=SC2016  # développé par le faux outil
 printf '#!/usr/bin/env bash\nfor f; do printf "%%s: 5 extents found\\n" "$f"; done\nkill -INT -- "-$ACME_TEST_PID"; sleep 2\n' > "$SEC/bin2/filefrag"; chmod +x "$SEC/bin2/filefrag"
-PATH="$SEC/bin2:$PATH" setsid bash -c "source '$ROOT/AcmeFrag.sh'; load_modules; export ACME_TEST_PID=\$\$; trap cleanup EXIT; trap 'exit 130' INT; REPORT_DIR='$SEC/scanrep'; scan_filesystem '$SEC/scan' '$SEC/scanrep/fragmentation_x.csv'" >/dev/null 2>&1
+TMPDIR="$SEC/tmp" PATH="$SEC/bin2:$PATH" setsid bash -c "source '$ROOT/AcmeFrag.sh'; load_modules; export ACME_TEST_PID=\$\$; trap cleanup EXIT; trap 'exit 130' INT; REPORT_DIR='$SEC/scanrep'; scan_filesystem '$SEC/scan' '$SEC/scanrep/fragmentation_x.csv'" >/dev/null 2>&1
 check "scan interrompu : aucun temporaire laissé" eq "$(ls -A "$SEC/scanrep")" ""
 check "scan interrompu : aucun temporaire laissé dans TMPDIR" \
-    eq "$(find "${TMPDIR:-/tmp}" -maxdepth 1 -type f -name 'tmp.*' -newer "$TEMOIN" 2>/dev/null)" ""
+    eq "$(ls -A "$SEC/tmp")" ""
 rm -rf "$SEC" "$SEC_TMP"
 
 echo "mineurs : affichage, entiers, codes, quota, configuration"

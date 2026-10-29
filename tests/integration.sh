@@ -129,6 +129,10 @@ test_fs() {
     chmod o-w "$WORK/reports"
     check "$fs : dossier de rapports modifiable par tous refusé (code 8)" test "$rc" -eq 8
     check "$fs : --sante : dossier de rapports modifiable par tous refusé (code 8)" test "$rc2" -eq 8
+    mkdir -p "$WORK/ouvert"; chmod 777 "$WORK/ouvert"
+    rc=0; env -u TERM REPORT_DIR="$WORK/ouvert/x/reports" "$ACME" "$MNT" --dry-run --no-monitor --force-ssd </dev/null >/dev/null 2>&1 || rc=$?
+    check "$fs : ancêtre modifiable par tous : refusé (code 8), rien créé dessous" test "$rc" -eq 8 -a ! -e "$WORK/ouvert/x"
+    rm -rf "$WORK/ouvert"
     # common.sh modifiable par tous : refusé AVANT d'être exécuté (il définit les contrôles)
     cp "$WORK/acmefrag/lib/common.sh" "$WORK/common.sh.orig"
     printf 'touch %q\n' "$WORK/pwned" >> "$WORK/acmefrag/lib/common.sh"; chmod o+w "$WORK/acmefrag/lib/common.sh"

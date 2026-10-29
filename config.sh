@@ -114,6 +114,7 @@ validate_config() {
     if is_uint "$QOS_IO_CLASS" && (( QOS_IO_CLASS < 1 || QOS_IO_CLASS > 3 )); then
         err "QOS_IO_CLASS doit valoir 1, 2 ou 3"; errors=$((errors + 1))
     fi
+    [[ "$REPORT_DIR" == / ]] || REPORT_DIR="${REPORT_DIR%/}"
     if [[ "$REPORT_DIR" != /* ]]; then
         err "REPORT_DIR doit être un chemin absolu (valeur : '$REPORT_DIR')"; errors=$((errors + 1))
     fi

@@ -31,10 +31,12 @@ readonly ACMEFRAG_SELF="${ACMEFRAG_HOME}/AcmeFrag.sh"
 # Chemin $1 sûr pour root : lui et chacun de ses parents jusqu'à / ne sont pas
 # des liens symboliques, appartiennent à root ou à l'uid $2, ne sont inscriptibles
 # par le groupe que si ce groupe est root ou le gid $3, et par les autres que s'il
-# s'agit d'un parent « sticky » de root (/tmp), jamais du chemin lui-même. Sinon
-# un autre compte pourrait y substituer un fichier.
+# s'agit d'un parent « sticky » de root (/tmp), jamais du chemin lui-même (sauf
+# $4 = parent : $1 est l'ancêtre d'un dossier à créer). Sinon un autre compte
+# pourrait y substituer un fichier.
 path_trusted() {
     local p="$1" uid_ok="${2:-0}" gid_ok="${3:-0}" uid gid mode final=true
+    [[ "${4:-}" == parent ]] && final=false
     [[ "$p" == /* ]] || return 1
     while :; do
         [[ -L "$p" ]] && return 1
@@ -63,17 +65,21 @@ trusted_owner() {
     fi
 }
 
-# Root peut-il charger, lire ou écrire $1 sans risque ? Hors root : toujours.
+# Root peut-il charger, lire ou écrire $1 sans risque ($2 = parent : voir
+# path_trusted) ? Hors root : toujours.
 root_may_use() {
     (( EUID == 0 )) || return 0
     local uid gid
     read -r uid gid < <(trusted_owner)
-    path_trusted "$1" "$uid" "$gid"
+    path_trusted "$1" "$uid" "$gid" "${2:-}"
 }
+
+# Raison d'un refus de confiance, pour les messages
+readonly UNTRUSTED_WHY="n'appartient pas à un compte de confiance (root, ou l'utilisateur sudo si AcmeFrag lui appartient), est un lien symbolique ou est modifiable par un autre compte"
 
 for _f in "$ACMEFRAG_SELF" "${ACMEFRAG_HOME}/lib/common.sh"; do
     root_may_use "$_f" || {
-        printf '   ❌ Refus : %s est modifiable par un autre compte que root ou l'"'"'utilisateur sudo (voir README, « Sécurité »).\n' "$_f" >&2
+        printf '   ❌ Refus : %s %s (voir README, « Sécurité »).\n' "$_f" "$UNTRUSTED_WHY" >&2
         exit 8   # EXIT_UNTRUSTED (lib/common.sh, pas encore chargé)
     }
 done
@@ -136,8 +142,9 @@ SÉCURITÉS
     SMART autre que PASSED, secteurs en attente, réalloués en hausse sur
     SMART_GUARD_DAYS jours d'historique --sante (sauf --force-sante ;
     avertissement seul en --dry-run). En root : refus du code, de la
-    configuration ou du dossier de rapports modifiables par un autre compte
-    que root ou l'utilisateur sudo (code 8). Fichiers modifiés depuis moins de
+    configuration ou du dossier de rapports qui n'appartiennent pas à un compte
+    de confiance (root, ou l'utilisateur sudo si AcmeFrag lui appartient) ou
+    qu'un autre compte peut modifier (code 8). Fichiers modifiés depuis moins de
     MIN_FILE_AGE_MIN minutes, liens symboliques et chemins hors de la cible
     ignorés. Surveillance : arrêt de l'outil en cours sur seuil critique.
     Tâche bridée par défaut : nice 19 + E/S « idle » (effectif avec BFQ).
@@ -244,10 +251,14 @@ cleanup() {
 }
 
 # Lancé via sudo : rendre à l'utilisateur les rapports créés en root, seulement
-# dans un dossier qui est déjà le sien (jamais récursif, jamais à travers un lien).
+# s'il est de confiance et dans un dossier qui est déjà le sien et que root a
+# accepté (jamais récursif, jamais à travers un lien).
 give_reports_back() {
+    local uid
     is_uint "${SUDO_UID:-}" && [[ -d "${REPORT_DIR:-}" && ! -L "$REPORT_DIR" ]] || return 0
-    [[ "$(stat -c %u -- "$REPORT_DIR")" == "$SUDO_UID" ]] || return 0
+    read -r uid _ < <(trusted_owner)
+    [[ "$uid" == "$SUDO_UID" && "$(stat -c %u -- "$REPORT_DIR")" == "$SUDO_UID" ]] || return 0
+    root_may_use "$REPORT_DIR" || return 0
     find "$REPORT_DIR" -maxdepth 2 ! -uid "$SUDO_UID" \( -type f -o -type d \) \
         -exec chown -h -- "${SUDO_UID}:${SUDO_GID:-$SUDO_UID}" {} + 2>/dev/null || true
 }
@@ -294,7 +305,7 @@ load_modules() {
     done
     for f in "${files[@]}"; do
         root_may_use "$f" || die "$EXIT_UNTRUSTED" \
-            "Refus : $f est modifiable par un autre compte que root ou l'utilisateur sudo (voir README, « Sécurité »)."
+            "Refus : $f $UNTRUSTED_WHY (voir README, « Sécurité »)."
     done
     # shellcheck source=config.sh
     source "${ACMEFRAG_HOME}/config.sh"
@@ -309,7 +320,6 @@ load_modules() {
 # défragmentation en cours, qui ne fait que lire l'historique).
 run_health_mode() {
     local target="${CLI_TARGET:-$DEFAULT_TARGET}" rc=0
-    trap cleanup EXIT
     local ignored=""
     [[ -n "$CLI_DRY_RUN" ]] && ignored+=" --dry-run"
     [[ -n "$CLI_MODE" ]] && ignored+=" --$CLI_MODE"
@@ -320,6 +330,7 @@ run_health_mode() {
         exit "$EXIT_HEALTH_UNAVAILABLE"
     fi
     require_report_dir
+    trap cleanup EXIT
     run_health_check "$target" || rc=$?
     exit "$rc"
 }
@@ -345,10 +356,10 @@ resolve_target() {
 # lui seront rendus).
 require_report_dir() {
     local d="$REPORT_DIR" parent="${REPORT_DIR%/*}"
-    local msg="Dossier de rapports refusé : %s est modifiable par un autre compte que root ou l'utilisateur sudo."
     while [[ ! -e "$d" ]]; do d="${d%/*}"; d="${d:-/}"; done
-    # shellcheck disable=SC2059
-    root_may_use "$d" || die "$EXIT_UNTRUSTED" "$(printf "$msg" "$d")"
+    if [[ "$d" != "$REPORT_DIR" ]]; then
+        root_may_use "$d" parent || die "$EXIT_UNTRUSTED" "Dossier de rapports refusé : $d $UNTRUSTED_WHY."
+    fi
     if [[ ! -e "$REPORT_DIR" ]]; then
         if is_uint "${SUDO_UID:-}" && [[ -d "${parent:-/}" && "$(stat -c %u -- "${parent:-/}")" == "$SUDO_UID" ]]; then
             install -d -m 0755 -o "$SUDO_UID" -g "${SUDO_GID:-$SUDO_UID}" -- "$REPORT_DIR"
@@ -356,8 +367,7 @@ require_report_dir() {
             mkdir -p -- "$REPORT_DIR"
         fi
     fi
-    # shellcheck disable=SC2059
-    root_may_use "$REPORT_DIR" || die "$EXIT_UNTRUSTED" "$(printf "$msg" "$REPORT_DIR")"
+    root_may_use "$REPORT_DIR" || die "$EXIT_UNTRUSTED" "Dossier de rapports refusé : $REPORT_DIR $UNTRUSTED_WHY."
 }
 
 main() {
