@@ -51,14 +51,26 @@ path_trusted() {
     done
 }
 
-# Comptes de confiance en root, "uid gid" : l'utilisateur sudo et son groupe
-# seulement si AcmeFrag lui appartient (clone personnel lancé par sudo : il
-# pourrait de toute façon tout faire en root) ; sinon root seul (installation
-# root, cron, règle sudoers limitée à AcmeFrag).
+# Groupe $1 privé au compte $2 : aucun membre déclaré, et aucun autre compte
+# ne l'a pour groupe principal (un groupe partagé comme « users » ne l'est pas).
+# Sans getent, ou si la liste des comptes est illisible : groupe refusé.
+_private_group() {
+    local members others
+    command -v getent >/dev/null 2>&1 || return 1
+    members=$(getent group "$1" 2>/dev/null | cut -d: -f4)
+    others=$(getent passwd 2>/dev/null | awk -F: -v g="$1" -v u="$2" '$4 == g && $3 != u { n++ } END { print n + 0 }') \
+        || return 1                                        # pipefail : échec de getent
+    [[ -z "$members" && "$others" == 0 ]]
+}
+
+# Comptes de confiance en root, "uid gid" : l'utilisateur sudo, et son groupe
+# s'il lui est privé, seulement si AcmeFrag lui appartient (clone personnel
+# lancé par sudo : il pourrait de toute façon tout faire en root) ; sinon root
+# seul (installation root, cron, règle sudoers limitée à AcmeFrag).
 trusted_owner() {
     local gid
     if [[ "${SUDO_UID:-}" =~ ^[0-9]+$ && "$(stat -c %u -- "$ACMEFRAG_SELF" 2>/dev/null)" == "$SUDO_UID" ]]; then
-        gid="${SUDO_GID:-}"; [[ "$gid" =~ ^[0-9]+$ ]] || gid=0
+        gid="${SUDO_GID:-}"; [[ "$gid" =~ ^[0-9]+$ ]] && _private_group "$gid" "$SUDO_UID" || gid=0
         printf '%s %s\n' "$SUDO_UID" "$gid"
     else
         printf '0 0\n'

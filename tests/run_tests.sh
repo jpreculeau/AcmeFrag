@@ -368,6 +368,10 @@ defrag "$DF/cible/lien.mkv"
 check "lien symbolique : outil jamais lancé" eq "$(cat "$DF/appels")" ""
 defrag "$DF/ailleurs/autre.mkv"
 check "fichier hors de la cible : outil jamais lancé" eq "$(cat "$DF/appels")" ""
+mkdir -p "$DF/hors"; printf 'x' > "$DF/hors/secret.mkv"; touch -d '2 days ago' "$DF/hors/secret.mkv"
+ln -s ../hors "$DF/cible/dossier"
+defrag "$DF/cible/dossier/secret.mkv"
+check "dossier parent remplacé par un lien : outil jamais lancé" eq "$(cat "$DF/appels")" ""
 defrag "$DF/cible/../ailleurs/autre.mkv"
 check "chemin en « .. » : outil jamais lancé" eq "$(cat "$DF/appels")" ""
 DRY_RUN=true defrag "$DF/cible/vieux.mkv"
@@ -460,6 +464,21 @@ check "dossier « sticky » de root (/tmp) comme parent -> sûr" path_trusted "$
 check "dossier « sticky » de root comme dossier final -> refusé" not path_trusted /tmp "$MOI" "$MON_GID"
 SUDO_UID=$MOI SUDO_GID=$MON_GID
 check "confiance : clone de l'utilisateur sudo -> lui et son groupe" eq "$(trusted_owner)" "$MOI $MON_GID"
+mkdir -p "$SEC/getent"
+# shellcheck disable=SC2016  # développé par le faux getent
+printf '#!/usr/bin/env bash\ncase "$1" in group) echo "partage:x:$2:autre" ;; passwd) echo "moi:x:%s:$2::/:/bin/sh" ;; esac\n' "$MOI" > "$SEC/getent/getent"
+chmod +x "$SEC/getent/getent"
+check "confiance : groupe sudo partagé avec un autre compte -> groupe refusé" eq "$(PATH="$SEC/getent:$PATH" trusted_owner)" "$MOI 0"
+# Groupe sans membre déclaré mais principal d'un autre compte (cas « users »)
+# shellcheck disable=SC2016  # développé par le faux getent
+printf '#!/usr/bin/env bash\ncase "$1" in group) echo "users:x:$2:" ;; passwd) printf "moi:x:%s:%s::/:/bin/sh\\nautre:x:%s:%s::/:/bin/sh\\n" ;; esac\n' \
+    "$MOI" "$MON_GID" "$((MOI + 1))" "$MON_GID" > "$SEC/getent/getent"
+check "confiance : groupe principal d'un autre compte (« users ») -> groupe refusé" eq "$(PATH="$SEC/getent:$PATH" trusted_owner)" "$MOI 0"
+mkdir -p "$SEC/sansgetent"; for o in stat awk cut; do ln -s "$(command -v "$o")" "$SEC/sansgetent/$o"; done
+check "confiance : getent absent -> groupe refusé (dans le doute)" eq "$(PATH="$SEC/sansgetent" trusted_owner)" "$MOI 0"
+# shellcheck disable=SC2016  # développé par le faux getent
+printf '#!/usr/bin/env bash\ncase "$1" in group) echo "g:x:$2:" ;; passwd) exit 2 ;; esac\n' > "$SEC/getent/getent"
+check "confiance : énumération des comptes en échec -> groupe refusé" eq "$(PATH="$SEC/getent:$PATH" trusted_owner)" "$MOI 0"
 SUDO_UID=$((MOI + 1))
 check "confiance : AcmeFrag n'appartient pas à l'utilisateur sudo -> root seul" eq "$(trusted_owner)" "0 0"
 unset SUDO_UID SUDO_GID

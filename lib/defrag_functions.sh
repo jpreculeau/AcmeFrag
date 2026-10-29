@@ -54,13 +54,15 @@ _defrag_cmd() {
     esac
 }
 
-# Le fichier $1 est-il bien dans la cible $2 ? Chemin absolu sous la cible, sans
-# « .. », pas un lien symbolique, sur le même FS. Un nom hostile (retour à la
-# ligne) ou un fichier remplacé par un lien entre le scan et la défragmentation
-# ne doit pas faire traiter un fichier d'ailleurs, hors des garde-fous.
+# Le fichier $1 est-il bien dans la cible $2 (canonique, cf. resolve_target) ?
+# Chemin absolu sous la cible, sans « .. », sans lien symbolique (ni lui ni un
+# dossier parent : readlink -f le laisse inchangé), sur le même FS. Un nom hostile
+# (retour à la ligne) ou un fichier ou dossier remplacé par un lien entre le scan
+# et la défragmentation ne doit pas faire traiter un fichier d'ailleurs.
 path_in_target() {
     local path="$1" target="${2%/}"
-    [[ "$path" == "$target"/* && "$path" != *"/../"* && ! -L "$path" && -f "$path" ]] || return 1
+    [[ "$path" == "$target"/* && "$path" != *"/../"* && -f "$path" ]] || return 1
+    [[ "$(readlink -f -- "$path")" == "$path" ]] || return 1
     [[ "$(stat -c %d -- "$path")" == "$(stat -c %d -- "${target:-/}")" ]]
 }
 
