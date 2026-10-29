@@ -12,19 +12,6 @@
 MONITOR_DIR=""
 MONITOR_PID=""
 
-# Détermine les arguments smartctl qui fonctionnent pour ce disque (USB : -d sat)
-_smart_args() {
-    local dev="$1" t
-    command -v smartctl >/dev/null 2>&1 || return 1
-    for t in "" "-d sat" "-d auto"; do
-        # shellcheck disable=SC2086
-        if smartctl -A $t "$dev" >/dev/null 2>&1; then
-            printf '%s\n' "$t"; return 0
-        fi
-    done
-    return 1
-}
-
 # Affiche "secteurs_realloues temperature" (NA si indisponible)
 _smart_read() {
     local dev="$1" args="$2"
@@ -74,8 +61,8 @@ _monitor_loop() {
 
 start_security_monitor() {
     local target="$1" dev args="" smart=false
-    dev="/dev/$(parent_disk "$(fs_source "$target")")"
-    if args=$(_smart_args "$dev"); then
+    dev=$(disk_device "$target")
+    if args=$(smart_args "$dev"); then
         smart=true
     else
         warn "SMART indisponible sur $dev (smartmontools absent ou pont USB non supporté)"

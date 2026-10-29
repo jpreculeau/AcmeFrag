@@ -71,6 +71,12 @@ test_fs() {
     check "$fs : fichier récent protégé" test "$(extents "$MNT/films/recent.mkv")" -eq "$r0"
     check "$fs : journal écrit" test -s "$WORK/reports/acmefrag_$(date +%Y-%m-%d).log"
 
+    # Santé : un périphérique loop n'a pas de SMART -> mesure impossible (code 7), sans historique
+    rc=0; run_acme "$MNT" --sante || rc=$?
+    check "$fs : --sante sans SMART -> code 7" test "$rc" -eq 7
+    check "$fs : --sante : ligne de bilan" grep -q "BILAN SANTÉ : mesure impossible" "$WORK/out.log"
+    check "$fs : --sante : pas d'historique" test ! -e "$WORK/reports/sante"
+
     # Menu interactif piloté par stdin : classement, bascule dry-run, TOP N, sélection, quitter
     rc=0
     printf '4\nd\n1\n3\n1 2\nq\n' | env -u TERM REPORT_DIR="$WORK/reports" \

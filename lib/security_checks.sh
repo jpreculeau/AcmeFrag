@@ -103,7 +103,8 @@ run_security_checks() {
     check_not_root_fs "$target" &&
     check_mounted_rw "$target" &&
     check_ssd_warning "$target" &&
-    check_required_tools "$target" || return 1
+    check_required_tools "$target" &&
+    check_disk_health "$target" || return 1
     ok "TOUTES LES VÉRIFICATIONS PASSÉES"
 }
 

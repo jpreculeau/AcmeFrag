@@ -5,7 +5,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Bash](https://img.shields.io/badge/bash-%23121011.svg?style=flat&logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
 [![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi-red)](https://www.raspberrypi.org/)
-[![Version](https://img.shields.io/badge/version-3.0.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-3.1.0-green.svg)](CHANGELOG.md)
 
 ## 📖 Description
 
@@ -25,6 +25,7 @@
 - ⏱️ **Fichiers en cours d'écriture ignorés** (modifiés depuis moins d'1 h : téléchargements, synchro)
 - 🐢 **Bridage automatique** : `nice 19` + E/S `idle` — la défragmentation ne passe qu'une fois le disque libre
 - 🌡️ **Surveillance temps réel** : secteurs réalloués SMART, température disque et système, arrêt automatique sur seuil
+- 🩺 **Santé du disque** (`--sante`) : relevé SMART en lecture seule (aucun auto-test, disque en veille non réveillé), historique par numéro de série, alertes sur dégradation ; refus de défragmenter un disque qui se dégrade
 - 📊 **Bilan** : avant/après mesuré par fichier, résumé de session, santé de l'espace libre
 - ⚙️ **Deux modes** : interactif (menu) ou automatique (cron)
 
@@ -63,6 +64,8 @@ acmefrag /mnt/HDD -s 0 -n 50 --auto    # filtre désactivé, 50 fichiers
 | `-e, --min-extents N` | Extents minimum pour traiter un fichier (défaut 2) |
 | `--dry-run` | Simulation |
 | `--force-ssd` | Autorise un SSD (déconseillé) |
+| `--sante` | Santé du disque qui porte la cible, sans défragmenter (voir ci-dessous) |
+| `--force-sante` | Défragmente malgré une mauvaise santé SMART (déconseillé) |
 | `--no-monitor` / `--no-qos` | Désactive la surveillance / le bridage |
 
 La cible peut être le point de montage ou n'importe quel dossier à l'intérieur.
@@ -85,15 +88,36 @@ d. Basculer le dry-run · q. Quitter
 ⏳ [14:33:12] (  2.1G) Galadragtus_et_le_serveur_doré.mp4            : Modifié il y a 12 min (écriture en cours ?) ⏭️
 ```
 
+### Santé du disque (`--sante`)
+
+```bash
+acmefrag /mnt/HDD --sante
+```
+
+Une sonde `smartctl -n standby -i` (pont USB : repli automatique sur `-d sat`) puis une lecture `smartctl -n standby -H -i -A -l error` : **aucun auto-test**, et un disque en veille n'est pas réveillé (mesure reportée). Chaque mesure est ajoutée à `REPORT_DIR/sante/<numéro de série>.tsv` (bilan, attributs 1, 5, 9, 187, 188, 194, 196, 197, 198, 199, erreurs ATA) et comparée à la précédente, avec l'évolution « avant → après ».
+
+Alertes (code `6`) :
+- bilan SMART différent de `PASSED` : au **changement** seulement (un FAILED déjà signalé est rappelé « connu » au journal, pour que les vraies aggravations ne soient pas noyées) ;
+- hausse des attributs 5, 196, 197, 198, 199 (CRC : câble ou boîtier) ou du nombre d'erreurs ATA ;
+- température (attribut 194, à défaut 190) strictement au-dessus de `SMART_TEMP_ALERT_C` (la surveillance pendant une défragmentation, elle, s'arrête dès `DISK_TEMP_THRESHOLD_C` atteint).
+
+Un disque sans numéro de série lisible est mesuré sans historique (pas de comparaison possible) ; un disque dont SMART ne rend ni bilan ni attribut est « mesure impossible » (code `7`).
+
+La dernière ligne, `BILAN SANTÉ : …`, résume le résultat pour un orchestrateur. Aucun verrou : `--sante` peut tourner pendant une défragmentation.
+
+**Garde-fou** : avant toute défragmentation, AcmeFrag refuse (code `3`) un disque au bilan autre que PASSED, avec des secteurs en attente (197), ou dont les secteurs réalloués (5) ont augmenté depuis la plus ancienne mesure `--sante` des `SMART_GUARD_DAYS` derniers jours (30) : des écritures massives sur un disque mourant accélèrent sa fin. Le garde-fou lit l'historique sans l'écrire ; la fenêtre évite qu'un `--sante` quotidien, qui enregistre la hausse, ne la fasse oublier avant la défragmentation suivante. `--force-sante` passe outre ; en `--dry-run`, simple avertissement, et le contrôle est rejoué si l'on quitte le dry-run depuis le menu (touche `d`). Si SMART est illisible (smartmontools absent, pont USB muet), le garde-fou avertit et laisse passer.
+
 ### Automatiser avec cron
 
 ```bash
 sudo crontab -e
 # Chaque dimanche à 3 h : pas de TTY -> mode automatique
 0 3 * * 0 /usr/local/bin/acmefrag /mnt/HDD --auto
+# Chaque jour à 8 h : santé du disque
+0 8 * * * /usr/local/bin/acmefrag /mnt/HDD --sante
 ```
 
-Codes de sortie : `0` OK · `1` erreur · `2` usage · `3` refus de sécurité · `4` déjà en cours · `5` arrêt par la surveillance · `130` interruption.
+Codes de sortie : `0` OK · `1` erreur · `2` usage · `3` refus de sécurité · `4` déjà en cours · `5` arrêt par la surveillance · `130` interruption. Avec `--sante` : `0` pas de nouvelle dégradation · `6` alerte · `7` mesure impossible (SMART indisponible, disque en veille ou non monté).
 
 ---
 
@@ -121,9 +145,11 @@ SMART_BAD_SECTOR_THRESHOLD=20
 | `SMART_BAD_SECTOR_THRESHOLD` / `..._DRIFT_THRESHOLD` | `50` / `5` | Secteurs réalloués (absolu / dérive) |
 | `DISK_TEMP_THRESHOLD_C` / `SYSTEM_TEMP_THRESHOLD_C` | `60` / `85` | Températures critiques |
 | `AUTO_STOP_ON_ALERT` | `true` | Arrêt automatique sur alerte |
+| `SMART_TEMP_ALERT_C` | `55` | `--sante` : alerte si la température du disque dépasse ce seuil (°C) |
+| `SMART_GUARD_DAYS` | `30` | Garde-fou (1 à 3650) : période sur laquelle une hausse des secteurs réalloués bloque la défragmentation |
 | `ALLOW_SSD_DEFRAG` / `ALLOW_ROOT_FS` | `false` | Garde-fous |
 
-Priorité : options CLI > `local.conf` > `/etc/acmefrag.conf` > variables d'environnement > défauts.
+Priorité : options CLI > `local.conf` > `/etc/acmefrag.conf` (autre chemin : `ACMEFRAG_SYSTEM_CONF`) > variables d'environnement > défauts.
 
 ---
 
@@ -148,11 +174,12 @@ config.sh                   Défauts documentés + validation
 lib/common.sh               Journalisation, codes de sortie, FS/disque, mesure des extents
 lib/security_checks.sh      Vérifications préalables, sélection de la cible
 lib/security_monitor.sh     Surveillance SMART / températures en tâche de fond
+lib/disk_health.sh          Santé du disque : lecture SMART passive, historique, alertes, garde-fou
 lib/scan_functions.sh       Scan -> CSV, rotation des rapports
 lib/defrag_functions.sh     Défragmentation mesurée (xfs_fsr / e4defrag)
 lib/display_functions.sh    Classement, bilans, santé de l'espace libre
 lib/maintenance_functions.sh Menu interactif
-tests/run_tests.sh          Tests unitaires (sans root)
+tests/run_tests.sh          Tests unitaires (sans root ni disque ; faux smartctl, copie sans local.conf)
 tests/integration.sh        Tests réels sur images XFS/EXT4 en loop (root)
 ```
 
@@ -168,6 +195,7 @@ sudo make it       # tests d'intégration (images loop, aucun disque réel touch
 
 - **« est sur le système de fichiers racine »** : le disque n'est pas monté (`findmnt /mnt/HDD`). C'est voulu : on ne défragmente pas la carte SD / le SSD système par erreur.
 - **« SMART indisponible »** : installez `smartmontools` ; certains ponts USB ne relaient pas SMART.
+- **« Défragmentation refusée : bilan SMART FAILED »** : le disque annonce sa fin ; sauvegardez-le plutôt que de le réorganiser. `acmefrag <cible> --sante` montre l'évolution, `--force-sante` passe outre.
 - **Beaucoup d'« Espace libre insuffisant »** : libérez de la place ou lancez la défragmentation globale (menu 7, XFS).
 - **Rien n'est traité** : les fichiers sont peut-être déjà assez contigus (colonne `TRAITABLE`), essayez `-s 0`.
 

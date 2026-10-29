@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.1.0 — 2026-10-29
+
+### Ajouté
+- `--sante` : santé du disque qui porte la cible. Lecture SMART passive (`-n standby` : un disque en veille n'est pas réveillé ; jamais d'auto-test), historique par numéro de série dans `REPORT_DIR/sante/`, évolution « avant → après » et alertes : bilan différent de PASSED (au changement), hausse des attributs 5, 196, 197, 198, 199 ou des erreurs ATA, température au-dessus de `SMART_TEMP_ALERT_C` (55 °C). Codes de sortie `6` (alerte) et `7` (mesure impossible), dernière ligne `BILAN SANTÉ : …` pour les orchestrateurs.
+- Garde-fou avant défragmentation : refus (code 3) d'un disque au bilan autre que PASSED, avec des secteurs en attente ou des réalloués en hausse sur `SMART_GUARD_DAYS` jours d'historique (30) ; `--force-sante` pour passer outre, simple avertissement en `--dry-run` (rejoué quand on quitte le dry-run depuis le menu interactif).
+- `ACMEFRAG_SYSTEM_CONF` : chemin du fichier de configuration système (défaut `/etc/acmefrag.conf`).
+
+### Corrigé
+- Tests unitaires : ils lisaient le `local.conf` de la machine. Le test « auto sans cible » lançait alors une vraie défragmentation du `DEFAULT_TARGET` réel. Ils tournent désormais sur une copie sans `local.conf` ni `/etc/acmefrag.conf`, sous une locale fixe (`2.5G` et non `2,5G`).
+- Détection SMART : le code de retour de `smartctl` est un masque ; seuls les bits « ligne de commande » et « ouverture » signalent un accès impossible (un disque FAILED renvoie 8 et reste lisible). Repli `-d auto`, redondant, retiré.
+
 ## 3.0.0 — 2026-09-27
 
 Audit complet de la v2.0 : correction des défauts bloquants, convergence avec la

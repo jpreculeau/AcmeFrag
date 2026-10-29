@@ -2,7 +2,13 @@
 # Tests unitaires AcmeFrag — sans root, sans disque. Usage : tests/run_tests.sh
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SOURCE="$(cd "$(dirname "$0")/.." && pwd)"
+# Copie du dépôt sans local.conf ni rapports, /etc/acmefrag.conf ignoré : un test
+# qui lance AcmeFrag ne doit jamais viser le vrai DEFAULT_TARGET de la machine.
+ROOT=$(mktemp -d)
+trap 'rm -rf "$ROOT"' EXIT
+tar -C "$SOURCE" --exclude=./.git --exclude=./local.conf --exclude=./reports -cf - . | tar -C "$ROOT" -xf -
+export ACMEFRAG_SYSTEM_CONF=/nonexistent LC_ALL=C.UTF-8
 PASS=0 FAIL=0
 
 check() {  # check "description" commande...
@@ -51,7 +57,7 @@ check "mode"    eq "$CLI_MODE" auto
 check "option inconnue -> code 2" bash -c "'$ROOT/AcmeFrag.sh' --nope >/dev/null 2>&1; [[ \$? -eq 2 ]]"
 check "-s sans entier -> code 2"  bash -c "'$ROOT/AcmeFrag.sh' -s abc >/dev/null 2>&1; [[ \$? -eq 2 ]]"
 check "deux cibles -> code 2"     bash -c "'$ROOT/AcmeFrag.sh' /a /b >/dev/null 2>&1; [[ \$? -eq 2 ]]"
-check "auto sans cible ni DEFAULT_TARGET -> code 2" bash -c "DEFAULT_TARGET= '$ROOT/AcmeFrag.sh' --auto --no-qos </dev/null >/dev/null 2>&1; [[ \$? -eq 2 ]]"
+check "auto sans cible ni DEFAULT_TARGET -> code 2" bash -c "DEFAULT_TARGET= '$ROOT/AcmeFrag.sh' --auto --dry-run --no-qos </dev/null >/dev/null 2>&1; [[ \$? -eq 2 ]]"
 check "config par défaut sans chemin personnel" bash -c "! grep -q '^: \"\${DEFAULT_TARGET:=/' '$ROOT/config.sh'"
 check "--help -> code 0"          bash -c "'$ROOT/AcmeFrag.sh' --help | grep -q ACMEFRAG"
 CLI_MODE=""
@@ -67,7 +73,194 @@ check "ligne monitor" eq "$(monitor_status_line)" "   🔒 MONITOR: bad_sectors=
 check "pas d'arrêt sans fichier stop" bash -c "! [[ -f '$MONITOR_DIR/stop' ]]"
 echo "BAD" > "$MONITOR_DIR/stop"
 check "arrêt demandé" monitor_should_stop
-rm -rf "$MONITOR_DIR" "$REPORT_DIR"
+rm -rf "$MONITOR_DIR"; MONITOR_DIR=""
+
+echo "santé du disque (SMART)"
+FIX="$ROOT/tests/fixtures/smartctl_ata.txt"
+FAKE_BIN="$ROOT/.faux-bin"; mkdir -p "$FAKE_BIN"   # sous $ROOT : nettoyé par le trap
+# Faux smartctl : FAKE_SMART_OUT (sortie), FAKE_SMART_RC (code), FAKE_SMART_SAT=1 (pont USB
+# qui exige -d sat), FAKE_SMART_STANDBY=1 (disque en veille) ; appels notés dans FAKE_SMART_LOG
+cat > "$FAKE_BIN/smartctl" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${FAKE_SMART_LOG:-/dev/null}"
+if [[ -n "${FAKE_SMART_SAT:-}" && " $* " != *" -d sat "* ]]; then
+    echo "/dev/x: Unknown USB bridge [0x174c:0x55aa (0x100)]"; exit 1
+fi
+if [[ -n "${FAKE_SMART_STANDBY:-}" && " $* " == *" -n standby "* ]]; then
+    echo "Device is in STANDBY mode, exit(2)"; exit 2
+fi
+cat "$FAKE_SMART_OUT"; exit "${FAKE_SMART_RC:-0}"
+EOF
+chmod +x "$FAKE_BIN/smartctl"
+PATH_SANS_FAUX="$PATH"
+export PATH="$FAKE_BIN:$PATH" FAKE_SMART_LOG="$FAKE_BIN/appels"
+# shellcheck disable=SC2317  # appelée indirectement par le code testé
+disk_device() { echo /dev/fake; }     # pas de vrai disque dans les tests
+HIST="$REPORT_DIR/sante/TEST123.tsv"
+# Sortie dérivée de la fixture : smart_out 's/motif/remplacement/' ...
+smart_out() {
+    local f="$FAKE_BIN/sortie" e; cp "$FIX" "$f"
+    for e in "$@"; do sed -i -E "$e" "$f"; done
+    export FAKE_SMART_OUT="$f"
+}
+reset_smart() { rm -rf "$REPORT_DIR/sante"; : > "$FAKE_SMART_LOG"; unset FAKE_SMART_SAT FAKE_SMART_STANDBY FAKE_SMART_RC; smart_out; }
+mesure() { HC_OUT=$(run_health_check /mnt/X 2>&1); HC_RC=$?; }
+
+reset_smart
+rec=$(_health_parse < "$FIX")
+check "parse : série, bilan, 1 5 9 187 188 194 196 197 198 199, erreurs ATA" \
+    eq "$rec" $'TEST123\tPASSED\t0\t40\t12345\tNA\tNA\t40\t7\t0\t0\t3\t4'
+check "parse : bilan FAILED (point d'exclamation retiré)" \
+    eq "$(sed 's/result: PASSED/result: FAILED!/' "$FIX" | _health_parse | cut -f2)" FAILED
+check "parse : heures au format 12345h+12m" \
+    eq "$(sed -E 's/12345$/12345h+12m+03.000s/' "$FIX" | _health_parse | cut -f5)" 12345
+check "parse : température par l'attribut 190 à défaut du 194" \
+    eq "$(sed -E 's/^194 Temperature_Celsius /190 Airflow_Temperature_Cel /' "$FIX" | _health_parse | cut -f8)" 40
+check "parse : série hostile assainie (tabulation, échappement)" \
+    eq "$(sed $'s/TEST123/AB\\tFAILED\\x1b[31m/' "$FIX" | _health_parse | cut -f1-2)" $'AB_FAILED__31m\tPASSED'
+check "parse : « No Errors Logged » -> 0 erreur ATA" \
+    eq "$(sed -E 's/^ATA Error Count.*/No Errors Logged/' "$FIX" | _health_parse | cut -f13)" 0
+
+mesure
+check "1re mesure PASSED -> code 0" eq "$HC_RC" 0
+check "historique créé (en-tête + 1 mesure)" eq "$(wc -l < "$HIST")" 2
+check "ligne de bilan pour un orchestrateur" grep -q "BILAN SANTÉ : " <<< "$HC_OUT"
+mesure
+check "mesure identique -> code 0" eq "$HC_RC" 0
+check "historique : 2 mesures" eq "$(wc -l < "$HIST")" 3
+
+smart_out 's/(Reallocated_Sector_Ct .*)40$/\148/'; mesure
+check "hausse des réalloués -> code 6" eq "$HC_RC" 6
+check "évolution affichée 40 → 48" grep -q "40 → 48" <<< "$HC_OUT"
+mesure
+check "réalloués stables ensuite -> code 0" eq "$HC_RC" 0
+
+for a in 196:7 197:0 198:0; do
+    reset_smart; mesure
+    smart_out "s/^(${a%%:*} .* )${a#*:}\$/\\1$(( ${a#*:} + 1 ))/"; mesure
+    check "hausse de l'attribut ${a%%:*} -> code 6" eq "$HC_RC" 6
+done
+reset_smart; mesure; smart_out 's/^ATA Error Count: 4/ATA Error Count: 6/'; mesure
+check "hausse des erreurs ATA -> code 6" eq "$HC_RC" 6
+check "erreurs ATA 4 → 6" grep -q "4 → 6" <<< "$HC_OUT"
+reset_smart; mesure; smart_out 's/(UDMA_CRC_Error_Count .*)3$/\14/'; mesure
+check "hausse du CRC (199) -> code 6" eq "$HC_RC" 6
+check "CRC : piste câble/boîtier" grep -qi "câble" <<< "$HC_OUT"
+reset_smart; mesure; smart_out 's/(Raw_Read_Error_Rate .*)0$/\1999/'; mesure
+check "attribut 1 suivi sans alerte -> code 0" eq "$HC_RC" 0
+
+reset_smart; smart_out 's/- +40 \(Min/-       56 (Min/'; mesure
+check "température 56 °C > 55 -> code 6" eq "$HC_RC" 6
+SMART_TEMP_ALERT_C=60; mesure
+check "seuil de température configurable (60)" eq "$HC_RC" 0
+SMART_TEMP_ALERT_C=55
+
+reset_smart; smart_out 's/result: PASSED/result: FAILED!/'; FAKE_SMART_RC=8 mesure
+check "bilan FAILED, 1re fois -> code 6" eq "$HC_RC" 6
+FAKE_SMART_RC=8 mesure
+check "bilan FAILED déjà connu -> code 0" eq "$HC_RC" 0
+check "FAILED connu rappelé au journal" grep -q "connu" <<< "$HC_OUT"
+smart_out 's/result: PASSED/result: FAILED!/' 's/(Reallocated_Sector_Ct .*)40$/\141/'
+FAKE_SMART_RC=8 mesure
+check "FAILED connu + hausse des réalloués -> code 6" eq "$HC_RC" 6
+
+reset_smart; export FAKE_SMART_SAT=1; mesure
+check "pont USB non reconnu : repli -d sat -> code 0" eq "$HC_RC" 0
+check "pont USB : -d sat utilisé" grep -q -- "-d sat" "$FAKE_SMART_LOG"
+check "smart_args (surveillance) : -d sat détecté" eq "$(smart_args /dev/fake)" "-d sat"
+reset_smart; smart_out; FAKE_SMART_RC=2 mesure
+check "pont USB illisible (sat compris) -> code 7" eq "$HC_RC" 7
+
+reset_smart; export FAKE_SMART_STANDBY=1; mesure
+check "disque en veille -> code 7 (mesure reportée)" eq "$HC_RC" 7
+check "disque en veille : jamais réveillé" not grep -qv -- "-n standby" "$FAKE_SMART_LOG"
+check "veille : pas d'historique" not test -e "$HIST"
+
+reset_smart
+PATH="$PATH_SANS_FAUX" mesure
+check "smartctl absent -> code 7" eq "$HC_RC" 7
+
+reset_smart; mesure; mesure; FAKE_SMART_SAT=1 mesure
+check "lecture seule : aucun auto-test SMART lancé" not grep -qE -- '(^| )(-t|--test|-X|--abort|-s|--smart|-o|-S)( |=|$)' "$FAKE_SMART_LOG"
+
+reset_smart; smart_out 's#TEST123#../../x y#'; mesure
+check "n° de série assaini : fichier dans sante/" test -f "$REPORT_DIR/sante/.._.._x_y.tsv"
+reset_smart; mkdir -p "$REPORT_DIR/sante"; ln -s "$REPORT_DIR/cible" "$HIST"; mesure
+check "historique en lien symbolique refusé -> code 7" eq "$HC_RC" 7
+check "lien symbolique : cible non écrite" not test -e "$REPORT_DIR/cible"
+reset_smart; AILLEURS="$ROOT/.ailleurs"; mkdir -p "$AILLEURS"; ln -s "$AILLEURS" "$REPORT_DIR/sante"; mesure
+check "dossier sante/ en lien symbolique refusé -> code 7" eq "$HC_RC" 7
+check "dossier sante/ en lien : rien écrit ailleurs" eq "$(ls -A "$AILLEURS")" ""
+rm -rf "$AILLEURS" "$REPORT_DIR/sante"
+reset_smart; smart_out '/^Serial Number:/d'; mesure
+check "série illisible : mesure sans historique -> code 0" eq "$HC_RC" 0
+check "série illisible : aucun historique partagé" not test -e "$REPORT_DIR/sante"
+reset_smart; smart_out '/self-assessment/d' '/^ *[0-9]+ [A-Z]/d' '/^ATA Error Count/d'; mesure
+check "ni bilan ni attribut (SMART désactivé) -> code 7" eq "$HC_RC" 7
+check "ni bilan ni attribut : pas d'historique" not test -e "$HIST"
+
+echo "garde-fou santé avant défragmentation"
+garde() { CD_OUT=$(check_disk_health /mnt/X 2>&1); CD_RC=$?; }
+reset_smart; mesure; garde
+check "disque sain -> défragmentation autorisée" eq "$CD_RC" 0
+check "garde-fou : historique non modifié" eq "$(wc -l < "$HIST")" 2
+smart_out 's/result: PASSED/result: FAILED!/'; garde
+check "bilan FAILED -> refus" eq "$CD_RC" 1
+check "refus expliqué (--force-sante)" grep -q -- "--force-sante" <<< "$CD_OUT"
+FORCE_HEALTH=true garde
+check "--force-sante -> autorisé" eq "$CD_RC" 0
+DRY_RUN=true garde
+check "dry-run -> avertissement seulement" eq "$CD_RC" 0
+smart_out 's/(Reallocated_Sector_Ct .*)40$/\141/'; garde
+check "réalloués en hausse depuis la dernière mesure -> refus" eq "$CD_RC" 1
+smart_out 's/result: PASSED/result: HARDWARE IMPENDING FAILURE!/'; garde
+check "bilan autre que PASSED (SAS) -> refus" eq "$CD_RC" 1
+# Fenêtre du garde-fou : une hausse déjà enregistrée par --sante reste bloquante
+historique() {  # historique "jours:réalloués"... (du plus ancien au plus récent)
+    local e; { printf 'date\tbilan\t1\t5\t9\t187\t188\t194\t196\t197\t198\t199\tata\n'
+    for e in "$@"; do printf '%s\tPASSED\t0\t%s\t12345\tNA\tNA\t40\t7\t0\t0\t3\t4\n' \
+        "$(date -d "-${e%%:*} days" '+%Y-%m-%dT%H:%M:%S')" "${e#*:}"; done; } > "$HIST"
+}
+smart_out
+historique 10:38 1:40; garde
+check "hausse enregistrée hier par --sante, sur 30 jours -> refus" eq "$CD_RC" 1
+historique 40:38 10:40; garde
+check "hausse hors de la fenêtre de 30 jours -> autorisé" eq "$CD_RC" 0
+historique 40:38; garde
+check "aucune mesure dans la fenêtre : comparaison à la dernière -> refus" eq "$CD_RC" 1
+historique 10:38 1:40
+SMART_GUARD_DAYS=5 garde
+check "fenêtre configurable (SMART_GUARD_DAYS=5) -> autorisé" eq "$CD_RC" 0
+historique 1:40; smart_out 's/(Current_Pending_Sector .*)0$/\13/'; garde
+check "secteurs en attente > 0 -> refus" eq "$CD_RC" 1
+check "refus motivé par les secteurs en attente" grep -q "3 secteur(s) en attente" <<< "$CD_OUT"
+PATH="$PATH_SANS_FAUX" garde
+check "smartctl absent -> poursuite (avertissement)" eq "$CD_RC" 0
+historique 1:1; cp "$HIST" "$REPORT_DIR/sante/NA.tsv"; smart_out '/^Serial Number:/d'; garde
+check "série illisible : NA.tsv jamais pris pour référence" eq "$CD_RC" 0
+# Menu interactif : sortir du dry-run rejoue le garde-fou
+menu_d() { run_maintenance /mnt/X /dev/null <<< $'d\nq' >/dev/null 2>&1; echo "$DRY_RUN"; }
+smart_out 's/result: PASSED/result: FAILED!/'
+check "menu « d » sur disque FAILED : dry-run maintenu" eq "$(DRY_RUN=true; menu_d)" true
+check "menu « d » sur disque FAILED avec --force-sante : dry-run désactivé" eq "$(DRY_RUN=true FORCE_HEALTH=true; menu_d)" false
+smart_out; rm -f "$REPORT_DIR/sante/NA.tsv"; historique 1:40
+check "menu « d » sur disque sain : dry-run désactivé" eq "$(DRY_RUN=true; menu_d)" false
+unset -f disk_device
+export PATH="$PATH_SANS_FAUX"; unset FAKE_SMART_LOG FAKE_SMART_OUT
+rm -rf "$FAKE_BIN"
+
+echo "options santé"
+CLI_TARGET="" CLI_HEALTH="" CLI_FORCE_HEALTH=""
+parse_args --sante /mnt/Y --force-sante
+check "--sante" eq "$CLI_HEALTH" true
+check "--force-sante" eq "$CLI_FORCE_HEALTH" true
+check "--sante sans cible ni DEFAULT_TARGET -> code 2" bash -c "DEFAULT_TARGET= '$ROOT/AcmeFrag.sh' --sante </dev/null >/dev/null 2>&1; [[ \$? -eq 2 ]]"
+check "SMART_GUARD_DAYS=3651 refusé" bash -c "source '$ROOT/lib/common.sh'; ACMEFRAG_HOME='$ROOT' SMART_GUARD_DAYS=3651; source '$ROOT/config.sh'; ! validate_config 2>/dev/null"
+check "SMART_GUARD_DAYS=3650 accepté" bash -c "source '$ROOT/lib/common.sh'; ACMEFRAG_HOME='$ROOT' SMART_GUARD_DAYS=3650; source '$ROOT/config.sh'; validate_config"
+check "SMART_GUARD_DAYS=0 refusé" bash -c "source '$ROOT/lib/common.sh'; ACMEFRAG_HOME='$ROOT' SMART_GUARD_DAYS=0; source '$ROOT/config.sh'; ! validate_config 2>/dev/null"
+check "SMART_GUARD_DAYS non numérique refusé" bash -c "source '$ROOT/lib/common.sh'; ACMEFRAG_HOME='$ROOT' SMART_GUARD_DAYS=x; source '$ROOT/config.sh'; ! validate_config 2>/dev/null"
+check "SMART_TEMP_ALERT_C non numérique refusé" bash -c "source '$ROOT/lib/common.sh'; ACMEFRAG_HOME='$ROOT' SMART_TEMP_ALERT_C=x; source '$ROOT/config.sh'; ! validate_config 2>/dev/null"
+rm -rf "$REPORT_DIR"
 
 printf '\n%d réussi(s), %d échec(s)\n' "$PASS" "$FAIL"
 (( FAIL == 0 ))

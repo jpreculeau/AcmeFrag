@@ -13,7 +13,8 @@
 ################################################################################
 
 # --- Surcharges optionnelles (chargées AVANT les défauts) --------------------
-for _conf in /etc/acmefrag.conf "${ACMEFRAG_HOME}/local.conf"; do
+# ACMEFRAG_SYSTEM_CONF : autre fichier système (tests : fichier absent)
+for _conf in "${ACMEFRAG_SYSTEM_CONF:-/etc/acmefrag.conf}" "${ACMEFRAG_HOME}/local.conf"; do
     # shellcheck source=/dev/null
     [[ -r "$_conf" ]] && source "$_conf"
 done
@@ -69,9 +70,20 @@ fi
 : "${SYSTEM_TEMP_THRESHOLD_C:=85}"
 : "${AUTO_STOP_ON_ALERT:=true}"
 
+# --- Santé du disque (--sante et garde-fou avant défragmentation) --------------
+# Lecture SMART passive (aucun auto-test). Historique : REPORT_DIR/sante/<n° de série>.tsv
+# Alerte si : bilan différent de PASSED (au changement), hausse des attributs 5, 196,
+# 197, 198, 199 ou des erreurs ATA, température au-dessus du seuil ci-dessous.
+# La défragmentation est refusée si le bilan est autre que PASSED, si des secteurs sont en
+# attente (197) ou si les réalloués (5) ont augmenté sur SMART_GUARD_DAYS jours
+# (par rapport à la plus ancienne mesure de cette période).
+: "${SMART_TEMP_ALERT_C:=55}"          # alerte si la température dépasse strictement ce seuil (°C)
+: "${SMART_GUARD_DAYS:=30}"            # période du garde-fou « réalloués en hausse » (jours)
+
 # --- Options d'exécution (modifiées par la ligne de commande) -------------------
 : "${DRY_RUN:=false}"
 : "${FORCE_SSD:=false}"
+: "${FORCE_HEALTH:=false}"             # --force-sante : défragmenter malgré une mauvaise santé
 
 # Valide la configuration : refuse les valeurs aberrantes au lieu de les corriger
 # silencieusement (une config fausse doit se voir).
@@ -80,7 +92,7 @@ validate_config() {
     for var in INTEL_THRESHOLD_MO DEFAULT_MIN_EXTENTS DEFAULT_TOP_LIMIT MIN_FILE_AGE_MIN \
                GLOBAL_FSR_TIMEOUT_SEC REPORT_MAX_AGE_DAYS QOS_NICE QOS_IO_CLASS \
                MONITOR_INTERVAL_SEC SMART_BAD_SECTOR_THRESHOLD SMART_BAD_SECTOR_DRIFT_THRESHOLD \
-               DISK_TEMP_THRESHOLD_C SYSTEM_TEMP_THRESHOLD_C; do
+               DISK_TEMP_THRESHOLD_C SYSTEM_TEMP_THRESHOLD_C SMART_TEMP_ALERT_C SMART_GUARD_DAYS; do
         if ! is_uint "${!var}"; then
             err "$var doit être un entier positif (valeur : '${!var}')"
             errors=$((errors + 1))
@@ -95,10 +107,13 @@ validate_config() {
     if is_uint "$MONITOR_INTERVAL_SEC" && (( MONITOR_INTERVAL_SEC < 1 )); then
         err "MONITOR_INTERVAL_SEC doit être >= 1"; errors=$((errors + 1))
     fi
+    if is_uint "$SMART_GUARD_DAYS" && (( SMART_GUARD_DAYS < 1 || SMART_GUARD_DAYS > 3650 )); then
+        err "SMART_GUARD_DAYS doit être entre 1 et 3650"; errors=$((errors + 1))
+    fi
     if is_uint "$QOS_IO_CLASS" && (( QOS_IO_CLASS < 1 || QOS_IO_CLASS > 3 )); then
         err "QOS_IO_CLASS doit valoir 1, 2 ou 3"; errors=$((errors + 1))
     fi
-    for var in ALLOW_ROOT_FS ALLOW_SSD_DEFRAG QOS_ENABLE MONITOR_ENABLE AUTO_STOP_ON_ALERT DRY_RUN FORCE_SSD; do
+    for var in ALLOW_ROOT_FS ALLOW_SSD_DEFRAG QOS_ENABLE MONITOR_ENABLE AUTO_STOP_ON_ALERT DRY_RUN FORCE_SSD FORCE_HEALTH; do
         case "${!var,,}" in
             true|false) printf -v "$var" '%s' "${!var,,}" ;;
             *) err "$var doit valoir true ou false (valeur : '${!var}')"; errors=$((errors + 1)) ;;

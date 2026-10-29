@@ -51,7 +51,11 @@ run_maintenance() {
                else
                    err "Choix invalide"
                fi ;;
-            d|D) if is_true "$DRY_RUN"; then DRY_RUN=false; warn "Dry-run DÉSACTIVÉ : les fichiers seront modifiés"
+            # Le garde-fou santé ne fait qu'avertir en dry-run : le rejouer avant d'écrire
+            d|D) if is_true "$DRY_RUN"; then
+                     DRY_RUN=false
+                     if check_disk_health "$target"; then warn "Dry-run DÉSACTIVÉ : les fichiers seront modifiés"
+                     else DRY_RUN=true; err "Dry-run maintenu (--force-sante pour passer outre)"; fi
                  else DRY_RUN=true; ok "Dry-run ACTIVÉ : opérations simulées"; fi ;;
             q|Q|'') log "✋ Au revoir !"; return 0 ;;
             *) err "Choix invalide" ;;

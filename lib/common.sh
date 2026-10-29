@@ -15,6 +15,8 @@ readonly EXIT_USAGE=2
 readonly EXIT_REFUSED=3     # vérification de sécurité refusée
 readonly EXIT_LOCKED=4      # une autre instance tourne déjà
 readonly EXIT_ALERT=5       # arrêt demandé par le module de surveillance
+readonly EXIT_HEALTH_ALERT=6        # --sante : dégradation du disque détectée
+readonly EXIT_HEALTH_UNAVAILABLE=7  # --sante : mesure impossible (SMART absent, veille…)
 readonly EXIT_INTERRUPTED=130
 
 readonly MIB=1048576
@@ -58,6 +60,9 @@ parent_disk() {
     [[ -n "$pk" ]] || pk=$(basename "$src")
     printf '%s\n' "$pk"
 }
+
+# Périphérique du disque physique qui porte le dossier $1 (ex: /dev/sda)
+disk_device() { printf '/dev/%s\n' "$(parent_disk "$(fs_source "$1")")"; }
 
 # "ssd", "hdd" ou "unknown"
 disk_kind() {

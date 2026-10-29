@@ -10,7 +10,7 @@
 
 set -Eeuo pipefail
 
-readonly ACMEFRAG_VERSION="3.0.0"
+readonly ACMEFRAG_VERSION="3.1.0"
 # readlink -f : fonctionne aussi via un lien symbolique (/usr/local/bin/acmefrag)
 ACMEFRAG_HOME="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 readonly ACMEFRAG_HOME
@@ -37,6 +37,9 @@ MODES
     --auto                  Scan + défragmentation des N premiers fichiers
                             éligibles, sans question (défaut hors terminal : cron)
     --interactive           Menu interactif (défaut dans un terminal)
+    --sante                 Santé du disque qui porte DOSSIER (SMART, lecture
+                            seule, sans réveiller un disque en veille) : évolution
+                            depuis la dernière mesure et alertes. Pas de défragmentation.
 
 OPTIONS
     -s, --seuil N           Seuil intelligent en Mo par extent (défaut 4096,
@@ -45,6 +48,7 @@ OPTIONS
     -e, --min-extents N     Nb minimum d'extents pour traiter un fichier (défaut 2)
         --dry-run           Simule : aucune modification
         --force-ssd         Autorise un SSD (déconseillé)
+        --force-sante       Défragmente malgré une mauvaise santé SMART (déconseillé)
         --no-monitor        Désactive la surveillance SMART / température
         --no-qos            Ne pas brider CPU/E-S (déconseillé pendant une lecture vidéo)
     -h, --help, --aide      Cette aide
@@ -54,6 +58,7 @@ EXEMPLES
     acmefrag /mnt/data --dry-run           # voir ce qui serait fait
     acmefrag /mnt/data/Films --auto        # cron : TOP 10 éligible
     acmefrag /mnt/data -s 0 --auto -n 50   # 50 fichiers, sans filtre
+    acmefrag /mnt/data --sante             # santé du disque (cron, orchestrateur)
 
 CONFIGURATION
     config.sh (défauts documentés), surchargés par /etc/acmefrag.conf puis
@@ -62,13 +67,19 @@ CONFIGURATION
 
 SÉCURITÉS
     Refus si : cible sur le FS racine, FS non XFS/EXT4, montage en lecture seule,
-    SSD (sauf --force-ssd), autre instance en cours. Fichiers modifiés depuis moins
+    SSD (sauf --force-ssd), autre instance en cours, disque en mauvaise santé :
+    bilan SMART autre que PASSED, secteurs en attente, réalloués en hausse sur
+    SMART_GUARD_DAYS jours d'historique --sante (sauf --force-sante ;
+    avertissement seul en --dry-run). Fichiers modifiés depuis moins
     de MIN_FILE_AGE_MIN minutes ignorés (téléchargement / synchro en cours).
     Tâche bridée par défaut : nice 19 + E/S « idle ».
 
 CODES DE SORTIE
     0 OK · 1 erreur · 2 usage · 3 refus sécurité · 4 déjà en cours ·
     5 arrêt par la surveillance · 130 interruption (Ctrl+C)
+    --sante : 0 pas de nouvelle dégradation · 6 alerte · 7 mesure impossible
+    (SMART indisponible, disque en veille ou non monté). Dernière ligne :
+    « BILAN SANTÉ : … »
 EOF
 }
 
@@ -77,6 +88,7 @@ EOF
 # ==============================================================================
 CLI_TARGET="" CLI_MODE="" CLI_SEUIL="" CLI_TOP="" CLI_MIN_EXT=""
 CLI_DRY_RUN="" CLI_FORCE_SSD="" CLI_NO_MONITOR="" CLI_NO_QOS=""
+CLI_HEALTH="" CLI_FORCE_HEALTH=""
 
 _need_uint() {  # $1 = option, $2 = valeur
     is_uint "${2:-}" || die "$EXIT_USAGE" "$1 attend un entier (reçu : '${2:-}')"
@@ -91,6 +103,8 @@ parse_args() {
             --interactive)      CLI_MODE=interactive ;;
             --dry-run)          CLI_DRY_RUN=true ;;
             --force-ssd)        CLI_FORCE_SSD=true ;;
+            --sante)            CLI_HEALTH=true ;;
+            --force-sante)      CLI_FORCE_HEALTH=true ;;
             --no-monitor)       CLI_NO_MONITOR=true ;;
             --no-qos)           CLI_NO_QOS=true ;;
             -s|--seuil)         _need_uint "$1" "${2:-}"; CLI_SEUIL="$2"; shift ;;
@@ -116,6 +130,7 @@ apply_cli_overrides() {
     [[ -n "$CLI_MIN_EXT" ]]    && DEFAULT_MIN_EXTENTS="$CLI_MIN_EXT"
     [[ -n "$CLI_DRY_RUN" ]]    && DRY_RUN=true
     [[ -n "$CLI_FORCE_SSD" ]]  && FORCE_SSD=true
+    [[ -n "$CLI_FORCE_HEALTH" ]] && FORCE_HEALTH=true
     [[ -n "$CLI_NO_MONITOR" ]] && MONITOR_ENABLE=false
     [[ -n "$CLI_NO_QOS" ]]     && QOS_ENABLE=false
     return 0
@@ -176,11 +191,25 @@ load_modules() {
     local m
     # shellcheck source=config.sh
     source "${ACMEFRAG_HOME}/config.sh"
-    for m in security_checks security_monitor scan_functions defrag_functions \
+    for m in security_checks disk_health security_monitor scan_functions defrag_functions \
              display_functions maintenance_functions; do
         # shellcheck source=/dev/null
         source "${ACMEFRAG_HOME}/lib/${m}.sh"
     done
+}
+
+# --sante : mesure courte, sans verrou ni journal (compatible avec une
+# défragmentation en cours, qui ne fait que lire l'historique).
+run_health_mode() {
+    local target="${CLI_TARGET:-$DEFAULT_TARGET}" rc=0
+    trap cleanup EXIT
+    printf '%s\n   🩺 ACMEFRAG v%s — santé du disque — %s\n%s\n' "$RULE" "$ACMEFRAG_VERSION" "$(date '+%Y-%m-%d %H:%M:%S')" "$RULE"
+    if ! { check_directory_exists "$target" && check_not_root_fs "$target"; }; then
+        _health_unavailable "cible $target absente ou disque non monté"
+        exit "$EXIT_HEALTH_UNAVAILABLE"
+    fi
+    run_health_check "$target" || rc=$?
+    exit "$rc"
 }
 
 # Choix de la cible : CLI, sinon DEFAULT_TARGET ; en interactif, proposer les
@@ -205,11 +234,12 @@ main() {
     validate_config || die "$EXIT_USAGE" "Configuration invalide"
 
     # Échouer tôt (avant sudo) si le mode auto n'a aucune cible
-    if [[ -z "$CLI_TARGET" && -z "$DEFAULT_TARGET" && "$(resolve_mode)" == auto ]]; then
+    if [[ -z "$CLI_TARGET" && -z "$DEFAULT_TARGET" ]] && [[ -n "$CLI_HEALTH" || "$(resolve_mode)" == auto ]]; then
         die "$EXIT_USAGE" "Aucune cible : passez un DOSSIER ou définissez DEFAULT_TARGET dans local.conf (voir --help)"
     fi
     ensure_root "${ORIGINAL_ARGS[@]}"
     apply_qos "${ORIGINAL_ARGS[@]}"
+    [[ -n "$CLI_HEALTH" ]] && run_health_mode
 
     local mode target csv logf
     mode=$(resolve_mode)
