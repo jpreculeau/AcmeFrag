@@ -18,7 +18,7 @@
 # serait exécuté avec tous les droits.
 for _conf in "${ACMEFRAG_SYSTEM_CONF:-/etc/acmefrag.conf}" "${ACMEFRAG_HOME}/local.conf"; do
     [[ -r "$_conf" ]] || continue
-    root_may_use "$_conf" || die "$EXIT_REFUSED" \
+    root_may_use "$_conf" || die "$EXIT_UNTRUSTED" \
         "Refus : $_conf est modifiable par un autre compte que root ou l'utilisateur sudo."
     # shellcheck source=/dev/null
     source "$_conf"

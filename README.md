@@ -46,7 +46,7 @@ Le script demande lui-même les droits root (`sudo`) au lancement.
 
 ### 🔐 Sécurité
 
-AcmeFrag travaille en root : son code, sa configuration et son dossier de rapports doivent être hors d'atteinte des autres comptes. En root, il refuse (code `3`) tout fichier ou dossier — et chacun de ses parents — qui n'appartient ni à root ni à l'utilisateur qui a lancé `sudo`, qui est un lien symbolique, ou qui est inscriptible par un autre groupe que celui de root ou de cet utilisateur.
+AcmeFrag travaille en root : son code, sa configuration et son dossier de rapports doivent être hors d'atteinte des autres comptes. En root, il refuse (code `8`) tout fichier ou dossier — et chacun de ses parents — qui n'appartient ni à root ni à l'utilisateur qui a lancé `sudo`, qui est un lien symbolique, ou qui est inscriptible par un autre groupe que celui de root ou de cet utilisateur.
 
 - **Lancement par `sudo` depuis votre clone** (cas ci-dessus) : accepté, vous pourriez de toute façon tout faire en root.
 - **Cron root, ou règle sudoers `NOPASSWD` limitée à AcmeFrag** : installez une copie qui appartient à root, sinon n'importe quel processus de votre compte pourrait modifier le code exécuté en root :
@@ -135,7 +135,7 @@ sudo crontab -e
 0 8 * * * /usr/local/bin/acmefrag /mnt/HDD --sante
 ```
 
-Codes de sortie : `0` OK · `1` erreur · `2` usage · `3` refus de sécurité · `4` déjà en cours · `5` arrêt par la surveillance · `130` interruption (Ctrl+C) · `143` arrêt (SIGTERM). Avec `--sante` : `0` pas de nouvelle dégradation · `6` alerte · `7` mesure impossible (SMART indisponible, disque en veille ou non monté) · `3` refus de sécurité (dossier de rapports).
+Codes de sortie : `0` OK · `1` erreur · `2` usage · `3` refus de sécurité · `4` déjà en cours · `5` arrêt par la surveillance · `8` installation non sûre (voir [Sécurité](#-sécurité)) · `130` interruption (Ctrl+C) · `143` arrêt (SIGTERM). Avec `--sante` : `0` pas de nouvelle dégradation · `6` alerte · `7` mesure impossible (SMART indisponible, disque en veille ou non monté) · `8` installation non sûre.
 
 ---
 

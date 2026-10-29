@@ -17,6 +17,7 @@ readonly EXIT_LOCKED=4      # une autre instance tourne déjà
 readonly EXIT_ALERT=5       # arrêt demandé par le module de surveillance
 readonly EXIT_HEALTH_ALERT=6        # --sante : dégradation du disque détectée
 readonly EXIT_HEALTH_UNAVAILABLE=7  # --sante : mesure impossible (SMART absent, veille…)
+readonly EXIT_UNTRUSTED=8   # root : code, configuration ou rapports modifiables par un autre compte
 readonly EXIT_INTERRUPTED=130     # Ctrl+C (SIGINT)
 readonly EXIT_TERMINATED=143      # SIGTERM (orchestrateur, systemd, kill)
 

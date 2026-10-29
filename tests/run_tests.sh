@@ -453,7 +453,7 @@ check "dossier « sticky » de root (/tmp) -> sûr" path_trusted /tmp
 echo "PRÉCIEUX" > "$SEC/victime"; mkdir -p "$SEC/rep"; ln -s "$SEC/victime" "$SEC/rep/.acmefrag.lock"
 check "verrou : lien symbolique posé -> cible intacte" bash -c "source '$ROOT/AcmeFrag.sh'; load_modules; REPORT_DIR='$SEC/rep'; acquire_lock; [[ \$(cat '$SEC/victime') == PRÉCIEUX ]]"
 ln -s "$SEC/victime" "$SEC/rep/journal.log"
-check "journal en lien symbolique -> code 3" bash -c "source '$ROOT/AcmeFrag.sh'; load_modules; set +e; (start_log '$SEC/rep/journal.log') >/dev/null 2>&1; [[ \$? -eq 3 ]]"
+check "journal en lien symbolique -> code 8" bash -c "source '$ROOT/AcmeFrag.sh'; load_modules; set +e; (start_log '$SEC/rep/journal.log') >/dev/null 2>&1; [[ \$? -eq 8 ]]"
 check "journal en lien symbolique -> cible intacte" eq "$(cat "$SEC/victime")" "PRÉCIEUX"
 # Rapports rendus à l'utilisateur sudo : jamais `chown -R`, jamais un dossier qui n'est pas le sien
 mkdir -p "$SEC/bin"; printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> %q\n' "$SEC/chown.log" > "$SEC/bin/chown"; chmod +x "$SEC/bin/chown"

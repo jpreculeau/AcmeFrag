@@ -80,17 +80,19 @@ SÉCURITÉS
     SMART_GUARD_DAYS jours d'historique --sante (sauf --force-sante ;
     avertissement seul en --dry-run). En root : refus du code, de la
     configuration ou du dossier de rapports modifiables par un autre compte
-    que root ou l'utilisateur sudo. Fichiers modifiés depuis moins de
+    que root ou l'utilisateur sudo (code 8). Fichiers modifiés depuis moins de
     MIN_FILE_AGE_MIN minutes, liens symboliques et chemins hors de la cible
     ignorés. Surveillance : arrêt de l'outil en cours sur seuil critique.
     Tâche bridée par défaut : nice 19 + E/S « idle » (effectif avec BFQ).
 
 CODES DE SORTIE
     0 OK · 1 erreur · 2 usage · 3 refus sécurité · 4 déjà en cours ·
-    5 arrêt par la surveillance · 130 interruption (Ctrl+C) · 143 arrêt (SIGTERM)
+    5 arrêt par la surveillance · 8 installation non sûre (code, configuration
+    ou rapports modifiables par un autre compte) · 130 interruption (Ctrl+C) ·
+    143 arrêt (SIGTERM)
     --sante : 0 pas de nouvelle dégradation · 6 alerte · 7 mesure impossible
-    (SMART indisponible, disque en veille ou non monté) · 3 refus de sécurité
-    (dossier de rapports). Dernière ligne, sauf refus : « BILAN SANTÉ : … »
+    (SMART indisponible, disque en veille ou non monté) · 8 installation non
+    sûre. Dernière ligne, sauf refus : « BILAN SANTÉ : … »
 EOF
 }
 
@@ -219,7 +221,7 @@ acquire_lock() {
 # Journal persistant : tout est dupliqué dans le fichier, rien n'est caché à
 # l'écran. Refus d'un lien symbolique : root ajouterait le journal à sa cible.
 start_log() {
-    [[ -L "$1" || ( -e "$1" && ! -f "$1" ) ]] && die "$EXIT_REFUSED" "Journal refusé (lien symbolique ou fichier spécial) : $1"
+    [[ -L "$1" || ( -e "$1" && ! -f "$1" ) ]] && die "$EXIT_UNTRUSTED" "Journal refusé (lien symbolique ou fichier spécial) : $1"
     # Couleurs à l'écran seulement : retirées de la copie écrite dans le fichier
     exec > >(tee >(LC_ALL=C sed -u $'s/\e\\[[0-9;]*m//g' >> "$1")) 2>&1
 }
@@ -229,7 +231,7 @@ start_log() {
 load_modules() {
     local m f
     for f in "$ACMEFRAG_SELF" "${ACMEFRAG_HOME}/config.sh" "${ACMEFRAG_HOME}"/lib/*.sh; do
-        root_may_use "$f" || die "$EXIT_REFUSED" \
+        root_may_use "$f" || die "$EXIT_UNTRUSTED" \
             "Refus : $f est modifiable par un autre compte que root ou l'utilisateur sudo (voir README, « Sécurité »)."
     done
     # shellcheck source=config.sh
@@ -278,7 +280,7 @@ resolve_target() {
 # substituer des fichiers (root y écrit : verrou, journal, CSV, historique).
 require_report_dir() {
     mkdir -p -- "$REPORT_DIR"
-    root_may_use "$REPORT_DIR" || die "$EXIT_REFUSED" \
+    root_may_use "$REPORT_DIR" || die "$EXIT_UNTRUSTED" \
         "Dossier de rapports refusé : $REPORT_DIR est modifiable par un autre compte que root ou l'utilisateur sudo."
 }
 

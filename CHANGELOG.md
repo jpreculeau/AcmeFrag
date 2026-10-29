@@ -3,10 +3,10 @@
 ## 4.0.0 — 2026-10-29
 
 Audit de la 3.1.0. Version majeure : en root, des installations jusque-là
-acceptées sont désormais refusées (code `3`), et les codes de sortie changent.
+acceptées sont désormais refusées (nouveau code `8`), et les codes de sortie changent.
 
 ### Sécurité
-- En root, refus (code `3`) du code (`AcmeFrag.sh`, `config.sh`, `lib/`), de `local.conf`, de `/etc/acmefrag.conf` et du dossier de rapports s'ils sont modifiables par un autre compte que root ou l'utilisateur sudo (propriétaire, liens symboliques, droits d'écriture, contrôlés jusqu'à `/`). **Un cron root sur un clone du dossier personnel est refusé** : installer une copie appartenant à root (README, « Sécurité »).
+- En root, refus du code (`AcmeFrag.sh`, `config.sh`, `lib/`), de `local.conf`, de `/etc/acmefrag.conf` et du dossier de rapports s'ils sont modifiables par un autre compte que root ou l'utilisateur sudo : nouveau code `8`, « installation non sûre », distinct du `3` (SSD, FS racine…) pour qu'un orchestrateur ne le prenne pas pour un refus attendu (propriétaire, liens symboliques, droits d'écriture, contrôlés jusqu'à `/`). **Un cron root sur un clone du dossier personnel est refusé** : installer une copie appartenant à root (README, « Sécurité »).
 - Verrou pris sur le dossier des rapports, ouvert en lecture : un lien symbolique posé à la place de l'ancien `.acmefrag.lock` faisait tronquer sa cible par root. Le fichier `.acmefrag.lock` n'est plus utilisé (il peut être supprimé).
 - Journal refusé s'il est un lien symbolique ; total du scan dans un fichier temporaire non prévisible ; rapports rendus à l'utilisateur sudo seulement dans un dossier qui est déjà le sien, sans `chown -R`.
 - Un nom de fichier contenant un retour à la ligne, ou un fichier remplacé par un lien symbolique, ne fait plus traiter un fichier hors de la cible.

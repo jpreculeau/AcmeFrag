@@ -114,21 +114,21 @@ test_fs() {
     mount -o remount,rw "$MNT"
     check "$fs : montage en lecture seule refusé (code 3)" test "$rc" -eq 3
 
-    # Code ou configuration modifiable par un autre compte : refus en root (code 3)
+    # Code ou configuration modifiable par un autre compte : refus en root (code 8)
     chmod o+w "$WORK/acmefrag/lib/common.sh"
     rc=0; run_acme "$MNT" --dry-run --no-monitor --force-ssd || rc=$?
     chmod o-w "$WORK/acmefrag/lib/common.sh"
-    check "$fs : module modifiable par tous refusé (code 3)" test "$rc" -eq 3
+    check "$fs : module modifiable par tous refusé (code 8)" test "$rc" -eq 8
     echo 'DEFAULT_TARGET=/nulle-part' > "$WORK/acmefrag/local.conf"; chmod 666 "$WORK/acmefrag/local.conf"
     rc=0; run_acme "$MNT" --dry-run --no-monitor --force-ssd || rc=$?
     rm -f "$WORK/acmefrag/local.conf"
-    check "$fs : local.conf modifiable par tous refusé (code 3)" test "$rc" -eq 3
+    check "$fs : local.conf modifiable par tous refusé (code 8)" test "$rc" -eq 8
     chmod o+w "$WORK/reports"
     rc=0; run_acme "$MNT" --dry-run --no-monitor --force-ssd || rc=$?
     rc2=0; run_acme "$MNT" --sante || rc2=$?
     chmod o-w "$WORK/reports"
-    check "$fs : dossier de rapports modifiable par tous refusé (code 3)" test "$rc" -eq 3
-    check "$fs : --sante : dossier de rapports modifiable par tous refusé (code 3)" test "$rc2" -eq 3
+    check "$fs : dossier de rapports modifiable par tous refusé (code 8)" test "$rc" -eq 8
+    check "$fs : --sante : dossier de rapports modifiable par tous refusé (code 8)" test "$rc2" -eq 8
     if [[ -n "${SUDO_UID:-}" ]]; then   # lancé par sudo : rapports rendus à l'utilisateur
         chown "$SUDO_UID" "$WORK/reports"
         run_acme "$MNT" --dry-run --no-monitor --force-ssd || true
@@ -141,7 +141,7 @@ test_fs() {
     check "$fs : aucune erreur inattendue" not grep -q "Erreur inattendue" "$WORK/reports/acmefrag_$(date +%Y-%m-%d).log"
 }
 
-# FS racine / non supporté : refus (code 3)
+# FS racine / non supporté : refus (code 8)
 rc=0; run_acme / --dry-run --no-monitor --force-ssd || rc=$?
 check "copie isolée : pas de local.conf de la machine" test ! -e "$(dirname "$ACME")/local.conf"
 check "racine refusée (code 3)" test "$rc" -eq 3
