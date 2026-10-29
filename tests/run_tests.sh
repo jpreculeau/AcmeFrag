@@ -29,7 +29,7 @@ export NO_COLOR=1
 # shellcheck source=../AcmeFrag.sh
 source "$ROOT/AcmeFrag.sh"
 set +e +E; trap - ERR
-REPORT_DIR=$(mktemp -d); load_modules
+REPORT_DIR=$(mktemp -d "$ROOT/rapports.XXXXXX"); load_modules   # sous $ROOT : nettoyé par le trap
 
 echo "parse_filefrag"
 out=$(printf '%s\n' \
@@ -498,6 +498,12 @@ check "surveillance inutile en simulation automatique" not eval 'DRY_RUN=true MO
 check "surveillance active en simulation interactive (dry-run désactivable)" eval 'DRY_RUN=true MONITOR_ENABLE=true monitor_wanted interactive'
 check "surveillance active hors simulation" eval 'DRY_RUN=false MONITOR_ENABLE=true monitor_wanted auto'
 check "surveillance désactivée par --no-monitor" not eval 'DRY_RUN=false MONITOR_ENABLE=false monitor_wanted auto'
+# Journal : couleurs à l'écran seulement, jamais dans le fichier
+( C_RED=$'\e[31m' C_RESET=$'\e[0m'; start_log "$MN/j.log"; err "rouge" ) >/dev/null 2>&1; sleep 0.3
+check "journal : aucune séquence de couleur" not grep -q $'\e' "$MN/j.log"
+check "journal : texte écrit" grep -q "rouge" "$MN/j.log"
+check "locale UTF-8 imposée (troncature des noms par caractères)" bash -c "LC_ALL=C; source '$ROOT/AcmeFrag.sh'; [[ \$LC_ALL == C.UTF-8 ]]"
+check "--sante : --dry-run ignoré, et dit" bash -c "source '$ROOT/AcmeFrag.sh'; load_modules; set +e; CLI_TARGET=/nulle-part CLI_DRY_RUN=true; out=\$(run_health_mode 2>&1); grep -q -- 'Ignoré avec --sante (lecture seule) : --dry-run' <<< \"\$out\""
 rm -rf "$MN"
 
 echo "isolation"

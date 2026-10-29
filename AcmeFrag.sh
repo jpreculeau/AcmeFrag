@@ -10,6 +10,12 @@
 
 set -Eeuo pipefail
 
+# Locale fixe : tri, nombres et troncature des noms (par caractère, pas par octet)
+# identiques sous cron, en terminal ou par sudo. C.UTF-8 si le système l'a.
+_locales=$(locale -a 2>/dev/null || true)
+if grep -qixE 'c\.utf-?8' <<< "$_locales"; then export LC_ALL=C.UTF-8; fi
+unset _locales
+
 readonly ACMEFRAG_VERSION="3.1.0"
 # readlink -f : fonctionne aussi via un lien symbolique (/usr/local/bin/acmefrag)
 ACMEFRAG_HOME="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
@@ -209,7 +215,8 @@ acquire_lock() {
 # l'écran. Refus d'un lien symbolique : root ajouterait le journal à sa cible.
 start_log() {
     [[ -L "$1" || ( -e "$1" && ! -f "$1" ) ]] && die "$EXIT_REFUSED" "Journal refusé (lien symbolique ou fichier spécial) : $1"
-    exec > >(tee -a "$1") 2>&1
+    # Couleurs à l'écran seulement : retirées de la copie écrite dans le fichier
+    exec > >(tee >(LC_ALL=C sed -u $'s/\e\\[[0-9;]*m//g' >> "$1")) 2>&1
 }
 
 # En root, ne charger que du code qu'aucun autre compte (hors utilisateur sudo)
@@ -234,6 +241,10 @@ load_modules() {
 run_health_mode() {
     local target="${CLI_TARGET:-$DEFAULT_TARGET}" rc=0
     trap cleanup EXIT
+    local ignored=""
+    [[ -n "$CLI_DRY_RUN" ]] && ignored+=" --dry-run"
+    [[ -n "$CLI_MODE" ]] && ignored+=" --$CLI_MODE"
+    [[ -z "$ignored" ]] || warn "Ignoré avec --sante (lecture seule) :$ignored"
     printf '%s\n   🩺 ACMEFRAG v%s — santé du disque — %s\n%s\n' "$RULE" "$ACMEFRAG_VERSION" "$(date '+%Y-%m-%d %H:%M:%S')" "$RULE"
     if ! { check_directory_exists "$target" && check_not_root_fs "$target"; }; then
         _health_unavailable "cible $target absente ou disque non monté"
