@@ -43,7 +43,8 @@ scan_filesystem() {
     log "---   ⏳ Peut prendre plusieurs minutes selon le nombre de fichiers…"
 
     tmp=$(mktemp "${csv}.XXXXXX")
-    total_file="${tmp}.total"
+    total_file=$(mktemp "${csv}.total.XXXXXX")
+    TMP_FILES+=("$tmp" "$total_file")
     {
         printf '%s\n' "$CSV_HEADER"
         while IFS=$'\t' read -r n path; do

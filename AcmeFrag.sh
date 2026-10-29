@@ -169,10 +169,17 @@ apply_qos() {
 # ==============================================================================
 cleanup() {
     stop_security_monitor 2>/dev/null || true
-    # Lancé via sudo : rendre les rapports à l'utilisateur (pas de fichiers root dans son dossier)
-    if [[ -n "${SUDO_UID:-}" && -d "${REPORT_DIR:-}" ]]; then
-        chown -R "${SUDO_UID}:${SUDO_GID:-$SUDO_UID}" -- "$REPORT_DIR" 2>/dev/null || true
-    fi
+    (( ${#TMP_FILES[@]} == 0 )) || rm -f -- "${TMP_FILES[@]}"
+    give_reports_back
+}
+
+# Lancé via sudo : rendre à l'utilisateur les rapports créés en root, seulement
+# dans un dossier qui est déjà le sien (jamais récursif, jamais à travers un lien).
+give_reports_back() {
+    is_uint "${SUDO_UID:-}" && [[ -d "${REPORT_DIR:-}" && ! -L "$REPORT_DIR" ]] || return 0
+    [[ "$(stat -c %u -- "$REPORT_DIR")" == "$SUDO_UID" ]] || return 0
+    find "$REPORT_DIR" -maxdepth 2 ! -uid "$SUDO_UID" \( -type f -o -type d \) \
+        -exec chown -h -- "${SUDO_UID}:${SUDO_GID:-$SUDO_UID}" {} + 2>/dev/null || true
 }
 
 on_interrupt() {
@@ -181,14 +188,28 @@ on_interrupt() {
     exit "$EXIT_INTERRUPTED"
 }
 
-# Verrou : une seule instance par dossier de rapports (cron + manuel)
+# Verrou : une seule instance par dossier de rapports (cron + manuel). Pris sur
+# le dossier lui-même, ouvert en lecture : aucun fichier créé ni tronqué en root.
 acquire_lock() {
-    exec {LOCK_FD}> "${REPORT_DIR}/.acmefrag.lock"
+    exec {LOCK_FD}< "$REPORT_DIR"
     flock -n "$LOCK_FD" || die "$EXIT_LOCKED" "Une autre instance d'AcmeFrag est en cours."
 }
 
+# Journal persistant : tout est dupliqué dans le fichier, rien n'est caché à
+# l'écran. Refus d'un lien symbolique : root ajouterait le journal à sa cible.
+start_log() {
+    [[ -L "$1" || ( -e "$1" && ! -f "$1" ) ]] && die "$EXIT_REFUSED" "Journal refusé (lien symbolique ou fichier spécial) : $1"
+    exec > >(tee -a "$1") 2>&1
+}
+
+# En root, ne charger que du code qu'aucun autre compte (hors utilisateur sudo)
+# ne peut modifier : il serait exécuté avec tous les droits.
 load_modules() {
-    local m
+    local m f
+    for f in "$ACMEFRAG_SELF" "${ACMEFRAG_HOME}/config.sh" "${ACMEFRAG_HOME}"/lib/*.sh; do
+        root_may_use "$f" || die "$EXIT_REFUSED" \
+            "Refus : $f est modifiable par un autre compte que root ou l'utilisateur sudo (voir README, « Sécurité »)."
+    done
     # shellcheck source=config.sh
     source "${ACMEFRAG_HOME}/config.sh"
     for m in security_checks disk_health security_monitor scan_functions defrag_functions \
@@ -208,6 +229,7 @@ run_health_mode() {
         _health_unavailable "cible $target absente ou disque non monté"
         exit "$EXIT_HEALTH_UNAVAILABLE"
     fi
+    require_report_dir
     run_health_check "$target" || rc=$?
     exit "$rc"
 }
@@ -224,6 +246,14 @@ resolve_target() {
         target=$(prompt_target_directory) || exit "$EXIT_USAGE"
     fi
     readlink -f -- "$target" 2>/dev/null || printf '%s\n' "$target"
+}
+
+# Dossier des rapports, créé au besoin ; refusé si un autre compte peut y
+# substituer des fichiers (root y écrit : verrou, journal, CSV, historique).
+require_report_dir() {
+    mkdir -p -- "$REPORT_DIR"
+    root_may_use "$REPORT_DIR" || die "$EXIT_REFUSED" \
+        "Dossier de rapports refusé : $REPORT_DIR est modifiable par un autre compte que root ou l'utilisateur sudo."
 }
 
 main() {
@@ -245,12 +275,11 @@ main() {
     mode=$(resolve_mode)
     target=$(resolve_target "$mode")
 
-    mkdir -p -- "$REPORT_DIR"
+    require_report_dir
     csv="${REPORT_DIR}/fragmentation_$(date +%Y-%m-%d).csv"
     logf="${REPORT_DIR}/acmefrag_$(date +%Y-%m-%d).log"
-    # Journal persistant : tout est dupliqué dans le fichier, rien n'est caché à l'écran.
     # `tee` est lancé AVANT le verrou pour ne pas en hériter (il survit un instant au script).
-    exec > >(tee -a "$logf") 2>&1
+    start_log "$logf"
     acquire_lock
 
     trap cleanup EXIT

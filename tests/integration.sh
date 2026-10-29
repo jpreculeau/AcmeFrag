@@ -95,11 +95,34 @@ test_fs() {
     env -u TERM REPORT_DIR="$WORK/reports" MONITOR_INTERVAL_SEC=30 "$ACME" "$MNT" --dry-run --auto --force-ssd </dev/null >/dev/null 2>&1 || rc=$?
     check "$fs : verrou libéré entre deux lancements surveillés" test "$rc" -ne 4
 
-    # Verrou : une seconde instance doit refuser (code 4)
-    exec {fd}> "$WORK/reports/.acmefrag.lock"; flock "$fd"
+    # Verrou : une seconde instance doit refuser (code 4) ; il est pris sur le dossier
+    exec {fd}< "$WORK/reports"; flock "$fd"
     rc=0; run_acme "$MNT" --dry-run --no-monitor --force-ssd || rc=$?
     check "$fs : instance concurrente refusée (code 4)" test "$rc" -eq 4
     exec {fd}>&-
+
+    # Code ou configuration modifiable par un autre compte : refus en root (code 3)
+    chmod o+w "$WORK/acmefrag/lib/common.sh"
+    rc=0; run_acme "$MNT" --dry-run --no-monitor --force-ssd || rc=$?
+    chmod o-w "$WORK/acmefrag/lib/common.sh"
+    check "$fs : module modifiable par tous refusé (code 3)" test "$rc" -eq 3
+    echo 'DEFAULT_TARGET=/nulle-part' > "$WORK/acmefrag/local.conf"; chmod 666 "$WORK/acmefrag/local.conf"
+    rc=0; run_acme "$MNT" --dry-run --no-monitor --force-ssd || rc=$?
+    rm -f "$WORK/acmefrag/local.conf"
+    check "$fs : local.conf modifiable par tous refusé (code 3)" test "$rc" -eq 3
+    chmod o+w "$WORK/reports"
+    rc=0; run_acme "$MNT" --dry-run --no-monitor --force-ssd || rc=$?
+    rc2=0; run_acme "$MNT" --sante || rc2=$?
+    chmod o-w "$WORK/reports"
+    check "$fs : dossier de rapports modifiable par tous refusé (code 3)" test "$rc" -eq 3
+    check "$fs : --sante : dossier de rapports modifiable par tous refusé (code 3)" test "$rc2" -eq 3
+    if [[ -n "${SUDO_UID:-}" ]]; then   # lancé par sudo : rapports rendus à l'utilisateur
+        chown "$SUDO_UID" "$WORK/reports"
+        run_acme "$MNT" --dry-run --no-monitor --force-ssd || true
+        check "$fs : rapports rendus à l'utilisateur sudo" \
+            test "$(stat -c %u "$WORK/reports/fragmentation_$(date +%Y-%m-%d).csv")" -eq "$SUDO_UID"
+        chown 0 "$WORK/reports"
+    fi
 
     umount "$MNT"; losetup -d "$LOOP"; MNT="" LOOP=""
     check "$fs : aucune erreur inattendue" not grep -q "Erreur inattendue" "$WORK/reports/acmefrag_$(date +%Y-%m-%d).log"

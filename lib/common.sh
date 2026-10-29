@@ -21,6 +21,9 @@ readonly EXIT_INTERRUPTED=130
 
 readonly MIB=1048576
 
+# Fichiers temporaires supprimés à la sortie (cleanup), même après une interruption
+TMP_FILES=()
+
 # --- Couleurs (désactivées hors terminal ou si NO_COLOR est défini) ----------
 if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
     C_RED=$'\e[31m' C_GREEN=$'\e[32m' C_YELLOW=$'\e[33m' C_BLUE=$'\e[34m' C_RESET=$'\e[0m'
@@ -42,6 +45,39 @@ is_true() { [[ "${1,,}" == "true" ]]; }
 
 # Taille lisible (octets -> "2.4G"). numfmt fait partie de coreutils.
 human_size() { numfmt --to=iec --format='%.1f' "$1" 2>/dev/null || printf '%sB' "$1"; }
+
+# --- Confiance (le script tourne en root) -------------------------------------
+# Chemin $1 sûr pour root : lui et chacun de ses parents jusqu'à / ne sont pas
+# des liens symboliques, appartiennent à root ou à l'uid $2, ne sont inscriptibles
+# par le groupe que si ce groupe est root ou le gid $3, et par les autres que s'il
+# s'agit d'un dossier « sticky » de root (/tmp). Sinon un autre compte pourrait y
+# substituer un fichier.
+path_trusted() {
+    local p="$1" uid_ok="${2:-0}" gid_ok="${3:-0}" uid gid mode
+    [[ "$p" == /* ]] || return 1
+    while :; do
+        [[ -L "$p" ]] && return 1
+        read -r uid gid mode < <(stat -c '%u %g %a' -- "$p" 2>/dev/null) || return 1
+        [[ "$uid" == 0 || "$uid" == "$uid_ok" ]] || return 1
+        if (( 8#$mode & 8#020 )) && [[ "$gid" != 0 && "$gid" != "$gid_ok" ]]; then return 1; fi
+        if (( 8#$mode & 8#002 )) && ! { (( 8#$mode & 8#1000 )) && [[ "$uid" == 0 ]]; }; then
+            return 1
+        fi
+        [[ "$p" == / ]] && return 0
+        p="${p%/*}"; p="${p:-/}"
+    done
+}
+
+# Root peut-il lire ou écrire $1 sans risque ? Accepté : root, ou le compte qui a
+# lancé sudo et son groupe (il pourrait de toute façon tout faire en root).
+# Hors root : toujours.
+root_may_use() {
+    (( EUID == 0 )) || return 0
+    local uid=0 gid=0
+    is_uint "${SUDO_UID:-}" && uid="$SUDO_UID"
+    is_uint "${SUDO_GID:-}" && gid="$SUDO_GID"
+    path_trusted "$1" "$uid" "$gid"
+}
 
 # --- Système de fichiers -----------------------------------------------------
 # Toutes ces fonctions acceptent n'importe quel chemin situé DANS le montage.

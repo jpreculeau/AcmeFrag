@@ -52,6 +52,7 @@ echo "validate_config"
 check "config par défaut valide" validate_config
 check "seuil non numérique refusé" bash -c "source '$ROOT/lib/common.sh'; ACMEFRAG_HOME='$ROOT' INTEL_THRESHOLD_MO=abc; source '$ROOT/config.sh'; ! validate_config 2>/dev/null"
 check "booléen normalisé (TRUE -> true)" bash -c "source '$ROOT/lib/common.sh'; ACMEFRAG_HOME='$ROOT' DRY_RUN=TRUE; source '$ROOT/config.sh'; validate_config && [[ \$DRY_RUN == true ]]"
+check "REPORT_DIR relatif refusé" bash -c "source '$ROOT/lib/common.sh'; ACMEFRAG_HOME='$ROOT' REPORT_DIR=reports; source '$ROOT/config.sh'; ! validate_config 2>/dev/null"
 check "min-extents < 2 refusé" bash -c "source '$ROOT/lib/common.sh'; ACMEFRAG_HOME='$ROOT' DEFAULT_MIN_EXTENTS=1; source '$ROOT/config.sh'; ! validate_config 2>/dev/null"
 
 echo "parse_args"
@@ -267,6 +268,43 @@ check "SMART_GUARD_DAYS=0 refusé" bash -c "source '$ROOT/lib/common.sh'; ACMEFR
 check "SMART_GUARD_DAYS non numérique refusé" bash -c "source '$ROOT/lib/common.sh'; ACMEFRAG_HOME='$ROOT' SMART_GUARD_DAYS=x; source '$ROOT/config.sh'; ! validate_config 2>/dev/null"
 check "SMART_TEMP_ALERT_C non numérique refusé" bash -c "source '$ROOT/lib/common.sh'; ACMEFRAG_HOME='$ROOT' SMART_TEMP_ALERT_C=x; source '$ROOT/config.sh'; ! validate_config 2>/dev/null"
 rm -rf "$REPORT_DIR"
+
+echo "sécurité root (fichiers et dossiers)"
+MOI=$(id -u) MON_GID=$(id -g)
+SEC="$ROOT/.securite"; mkdir -p "$SEC/sain" "$SEC/ouvert"; chmod 755 "$ROOT" "$SEC" "$SEC/sain"
+: > "$SEC/sain/f.sh"; chmod 644 "$SEC/sain/f.sh"
+check "chemin à soi, propriétaire autorisé -> sûr" path_trusted "$SEC/sain/f.sh" "$MOI" "$MON_GID"
+check "chemin à soi, propriétaire non autorisé -> refusé" not path_trusted "$SEC/sain/f.sh" 0 "$MON_GID"
+chmod 664 "$SEC/sain/f.sh"
+check "inscriptible par un groupe non autorisé -> refusé" not path_trusted "$SEC/sain/f.sh" "$MOI" 0
+check "inscriptible par le groupe de l'utilisateur sudo -> sûr" path_trusted "$SEC/sain/f.sh" "$MOI" "$MON_GID"
+chmod 644 "$SEC/sain/f.sh"; chmod 777 "$SEC/ouvert"; : > "$SEC/ouvert/f.sh"
+check "dossier parent inscriptible par tous -> refusé" not path_trusted "$SEC/ouvert/f.sh" "$MOI" "$MON_GID"
+ln -s "$SEC/sain" "$SEC/lien"
+check "lien symbolique sur le chemin -> refusé" not path_trusted "$SEC/lien/f.sh" "$MOI"
+check "chemin relatif -> refusé" not path_trusted "sain/f.sh" "$MOI"
+check "dossier « sticky » de root (/tmp) -> sûr" path_trusted /tmp
+# Verrou : ne jamais ouvrir (ni tronquer) un fichier posé dans le dossier des rapports
+echo "PRÉCIEUX" > "$SEC/victime"; mkdir -p "$SEC/rep"; ln -s "$SEC/victime" "$SEC/rep/.acmefrag.lock"
+check "verrou : lien symbolique posé -> cible intacte" bash -c "source '$ROOT/AcmeFrag.sh'; load_modules; REPORT_DIR='$SEC/rep'; acquire_lock; [[ \$(cat '$SEC/victime') == PRÉCIEUX ]]"
+ln -s "$SEC/victime" "$SEC/rep/journal.log"
+check "journal en lien symbolique -> code 3" bash -c "source '$ROOT/AcmeFrag.sh'; load_modules; set +e; (start_log '$SEC/rep/journal.log') >/dev/null 2>&1; [[ \$? -eq 3 ]]"
+check "journal en lien symbolique -> cible intacte" eq "$(cat "$SEC/victime")" "PRÉCIEUX"
+# Rapports rendus à l'utilisateur sudo : jamais `chown -R`, jamais un dossier qui n'est pas le sien
+mkdir -p "$SEC/bin"; printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> %q\n' "$SEC/chown.log" > "$SEC/bin/chown"; chmod +x "$SEC/bin/chown"
+: > "$SEC/chown.log"
+PATH="$SEC/bin:$PATH" SUDO_UID=$((MOI + 1)) bash -c "source '$ROOT/AcmeFrag.sh'; load_modules; REPORT_DIR='$SEC/rep'; cleanup"
+check "chown : dossier de rapports d'un autre compte que l'utilisateur sudo -> rien" eq "$(cat "$SEC/chown.log")" ""
+PATH="$SEC/bin:$PATH" SUDO_UID=$MOI bash -c "source '$ROOT/AcmeFrag.sh'; load_modules; REPORT_DIR='$SEC/rep'; cleanup"
+check "chown : jamais récursif" not grep -q -- '-R' "$SEC/chown.log"
+# Scan interrompu : aucun fichier temporaire laissé à côté du CSV
+mkdir -p "$SEC/scan" "$SEC/scanrep" "$SEC/bin2"
+printf 'x' > "$SEC/scan/a"
+# shellcheck disable=SC2016  # $ACME_TEST_PID est développé par le faux filefrag
+printf '#!/usr/bin/env bash\nkill -INT "$ACME_TEST_PID"; sleep 2\n' > "$SEC/bin2/filefrag"; chmod +x "$SEC/bin2/filefrag"
+PATH="$SEC/bin2:$PATH" bash -c "source '$ROOT/AcmeFrag.sh'; load_modules; export ACME_TEST_PID=\$\$; trap cleanup EXIT; trap 'exit 130' INT; REPORT_DIR='$SEC/scanrep'; scan_filesystem '$SEC/scan' '$SEC/scanrep/fragmentation_x.csv'" >/dev/null 2>&1
+check "scan interrompu : aucun temporaire laissé" eq "$(ls -A "$SEC/scanrep")" ""
+rm -rf "$SEC"
 
 echo "isolation"
 check "aucun appel à sudo pendant les tests" eq "$(cat "$SUDO_LOG")" ""

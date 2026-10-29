@@ -14,9 +14,14 @@
 
 # --- Surcharges optionnelles (chargées AVANT les défauts) --------------------
 # ACMEFRAG_SYSTEM_CONF : autre fichier système (tests : fichier absent)
+# En root, un fichier qu'un autre compte peut modifier n'est pas chargé : son code
+# serait exécuté avec tous les droits.
 for _conf in "${ACMEFRAG_SYSTEM_CONF:-/etc/acmefrag.conf}" "${ACMEFRAG_HOME}/local.conf"; do
+    [[ -r "$_conf" ]] || continue
+    root_may_use "$_conf" || die "$EXIT_REFUSED" \
+        "Refus : $_conf est modifiable par un autre compte que root ou l'utilisateur sudo."
     # shellcheck source=/dev/null
-    [[ -r "$_conf" ]] && source "$_conf"
+    source "$_conf"
 done
 unset _conf
 
@@ -112,6 +117,9 @@ validate_config() {
     fi
     if is_uint "$QOS_IO_CLASS" && (( QOS_IO_CLASS < 1 || QOS_IO_CLASS > 3 )); then
         err "QOS_IO_CLASS doit valoir 1, 2 ou 3"; errors=$((errors + 1))
+    fi
+    if [[ "$REPORT_DIR" != /* ]]; then
+        err "REPORT_DIR doit être un chemin absolu (valeur : '$REPORT_DIR')"; errors=$((errors + 1))
     fi
     for var in ALLOW_ROOT_FS ALLOW_SSD_DEFRAG QOS_ENABLE MONITOR_ENABLE AUTO_STOP_ON_ALERT DRY_RUN FORCE_SSD FORCE_HEALTH; do
         case "${!var,,}" in
