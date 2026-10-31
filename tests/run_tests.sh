@@ -265,6 +265,24 @@ check "fenêtre configurable (SMART_GUARD_DAYS=5) -> autorisé" eq "$CD_RC" 0
 historique 1:40; smart_out 's/(Current_Pending_Sector .*)0$/\13/'; garde
 check "secteurs en attente > 0 -> refus" eq "$CD_RC" 1
 check "refus motivé par les secteurs en attente" grep -q "3 secteur(s) en attente" <<< "$CD_OUT"
+# Disque mourant redevenu PASSED (attribut fautif remonté au-dessus du seuil) : cas réel
+historique 1:40; printf '%s\tFAILED\t0\t40\t12345\tNA\tNA\t40\t7\t0\t0\t3\t4\n' "$(date -d '-60 days' '+%Y-%m-%dT%H:%M:%S')" \
+    | sed -i '1r /dev/stdin' "$HIST"; smart_out; garde
+check "FAILED déjà enregistré (même hors fenêtre), PASSED aujourd'hui -> refus" eq "$CD_RC" 1
+check "refus motivé par le FAILED enregistré, avec sa date" grep -q "bilan SMART FAILED enregistré le $(date -d '-60 days' +%Y-%m-%d)" <<< "$CD_OUT"
+check "FAILED enregistré : jamais présenté comme sain" not grep -q "sous les seuils" <<< "$CD_OUT"
+# Réalloués au-delà du seuil absolu, sans hausse récente (152 stables)
+historique 10:152 1:152; smart_out 's/(Reallocated_Sector_Ct .*)40$/\1152/'; garde
+check "152 réalloués stables, seuil 50 -> refus" eq "$CD_RC" 1
+check "refus motivé par le seuil des réalloués" grep -q "152 secteurs réalloués (seuil 50)" <<< "$CD_OUT"
+SMART_BAD_SECTOR_THRESHOLD=153 garde
+check "réalloués sous le seuil configuré -> autorisé" eq "$CD_RC" 0
+SMART_BAD_SECTOR_THRESHOLD=152 garde
+check "réalloués au seuil (comme la surveillance : >=) -> refus" eq "$CD_RC" 1
+SMART_BAD_SECTOR_THRESHOLD=0 garde
+check "seuil 0 : critère désactivé" eq "$CD_RC" 0
+historique 1:40; smart_out; garde
+check "disque sain : valeurs affichées, pas seulement un verdict" grep -q "bilan PASSED, réalloués 40, en attente 0, erreurs ATA 4" <<< "$CD_OUT"
 PATH="$PATH_SANS_FAUX" garde
 check "smartctl absent -> poursuite (avertissement)" eq "$CD_RC" 0
 historique 1:1; cp "$HIST" "$REPORT_DIR/sante/NA.tsv"; smart_out '/^Serial Number:/d'; garde
