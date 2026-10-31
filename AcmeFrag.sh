@@ -16,7 +16,7 @@ _locales=$(locale -a 2>/dev/null || true)
 if grep -qixE 'c\.utf-?8' <<< "$_locales"; then export LC_ALL=C.UTF-8; fi
 unset _locales
 
-readonly ACMEFRAG_VERSION="4.0.0"
+readonly ACMEFRAG_VERSION="4.0.1"
 # readlink -f : fonctionne aussi via un lien symbolique (/usr/local/bin/acmefrag)
 ACMEFRAG_HOME="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 readonly ACMEFRAG_HOME
@@ -151,7 +151,8 @@ SÉCURITÉS
     Refus si : cible sur le FS racine (bind mount compris), FS non XFS/EXT4,
     montage en lecture seule, SSD ou type de disque indéterminé (sauf
     --force-ssd), autre instance en cours, disque en mauvaise santé : bilan
-    SMART autre que PASSED, secteurs en attente, réalloués en hausse sur
+    SMART autre que PASSED (ou déjà enregistré par --sante), secteurs en
+    attente, réalloués au-delà de SMART_BAD_SECTOR_THRESHOLD ou en hausse sur
     SMART_GUARD_DAYS jours d'historique --sante (sauf --force-sante ;
     avertissement seul en --dry-run). En root : refus du code, de la
     configuration ou du dossier de rapports qui n'appartiennent pas à un compte
