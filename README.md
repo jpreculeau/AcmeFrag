@@ -5,7 +5,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Bash](https://img.shields.io/badge/bash-%23121011.svg?style=flat&logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
 [![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi-red)](https://www.raspberrypi.org/)
-[![Version](https://img.shields.io/badge/version-4.1.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.1.1-green.svg)](CHANGELOG.md)
 
 ## 📖 Description
 

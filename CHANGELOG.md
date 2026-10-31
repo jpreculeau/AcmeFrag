@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.1.1 — 2026-10-31
+
+### Corrigé
+- Liens physiques, journal `🔗 … déjà traité via …` : les caractères de contrôle C1 codés en UTF-8 (CSI 8 bits, `\xc2\x9b`…) d'un nom passaient, le filtre tournant en locale C ; ils sont remplacés par `?`, comme les autres caractères de contrôle.
+
 ## 4.1.0 — 2026-10-31
 
 ### Ajouté

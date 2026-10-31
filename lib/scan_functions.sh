@@ -30,18 +30,23 @@ _find_exclude_args() {
 # multi (inodes à plusieurs noms), shared (leurs octets), links (noms ignorés).
 # Enregistrements terminés par NUL, chemin = tout ce qui suit les trois premiers
 # champs (il peut contenir des espaces). Un nom à tabulation ou retour à la ligne
-# (non représentable au CSV, écarté par _scan_rows) est ignoré ici : il ne doit
-# pas devenir le « premier nom » d'un inode qui en a un valide. Locale C : octets
-# tels quels, pas d'avertissement gawk sur un nom non UTF-8.
+# (non représentable au CSV) est écarté ici, avant d'avoir pu devenir le « premier
+# nom » d'un inode qui en a un valide. Un inode vu avec nlink > 1 n'est jamais oublié :
+# un nom ajouté ensuite (cross-seed pendant le parcours) ne le fait pas re-mesurer.
+# Limite connue, comme en 4.1.0 : un fichier vu sous son seul nom puis lié pendant le
+# parcours est mesuré deux fois (l'éviter imposerait de retenir tous les inodes).
+# Locale C : octets tels quels, pas d'avertissement gawk sur un nom non UTF-8 ; d'où
+# le retrait explicite des contrôles C1 codés en UTF-8 (\302\200-\302\237), que
+# [[:cntrl:]] ne voit pas en C (printable() les retire en C.UTF-8).
 _dedupe_inodes() {
     LINKS="$1" STATS="$2" LC_ALL=C awk -v RS='\0' -v ORS='\0' '
+        function clean(s) { gsub(/[[:cntrl:]]/, "?", s); gsub(/\302[\200-\237]/, "?", s); return s }
         {
             path = substr($0, length($1) + length($2) + length($3) + 4)
             if (path ~ /[\t\n]/) next
             if ($2 > 1) {                                  # nlink > 1 seulement
-                if ($1 in first) {                     # noté sans caractère de contrôle (journal)
-                    a = path; b = first[$1]; gsub(/[[:cntrl:]]/, "?", a); gsub(/[[:cntrl:]]/, "?", b)
-                    printf "%s\t%s\n", a, b >> ENVIRON["LINKS"]
+                if ($1 in first) {
+                    printf "%s\t%s\n", clean(path), clean(first[$1]) >> ENVIRON["LINKS"]
                     links++; next
                 }
                 first[$1] = path; multi++; shared += $3
@@ -74,9 +79,10 @@ _scan_extents() {
 scan_stat() { awk -F'\t' -v k="$1" '$1 == k { print $2 }' "$2" 2>/dev/null; }
 
 # "extents<TAB>chemin" (stdin, sortie de _scan_extents) -> lignes CSV sans en-tête.
-# $2 = fichier de travail. Écartés : chemin hors de la cible $1 (morceau d'un nom
-# à retour à la ligne, relatif au dossier courant) ou contenant une tabulation
-# (non représentable). Tailles par lots (xargs stat) : pas de processus par fichier.
+# $2 = fichier de travail. Écartés, par défense en profondeur (_dedupe_inodes ne
+# laisse déjà passer aucun nom à tabulation ou retour à la ligne) : chemin hors de
+# la cible $1 ou contenant une tabulation (non représentable). Tailles par lots
+# (xargs stat) : pas de processus par fichier.
 _scan_rows() {
     local list="$2"
     # Chemins par l'environnement : awk -v interpréterait les « \ » d'un nom

@@ -16,7 +16,7 @@ _locales=$(locale -a 2>/dev/null || true)
 if grep -qixE 'c\.utf-?8' <<< "$_locales"; then export LC_ALL=C.UTF-8; fi
 unset _locales
 
-readonly ACMEFRAG_VERSION="4.1.0"
+readonly ACMEFRAG_VERSION="4.1.1"
 # readlink -f : fonctionne aussi via un lien symbolique (/usr/local/bin/acmefrag)
 ACMEFRAG_HOME="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 readonly ACMEFRAG_HOME
