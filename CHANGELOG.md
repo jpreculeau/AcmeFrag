@@ -1,5 +1,17 @@
 # Changelog
 
+## 4.1.0 — 2026-10-31
+
+### Ajouté
+- **Liens physiques** (cross-seed : `xseed-links/<tracker>/…`) : un fichier à plusieurs noms n'est plus lu, mesuré ni défragmenté une fois par nom. Le scan dédoublonne par inode (`st_dev:st_ino`) pendant le parcours : un seul nom par inode, le premier rencontré, est passé à `filefrag` et au filtre « assez contigu » ; les autres sont journalisés (`🔗 <nom> : déjà traité via <premier nom>`). C'est l'inode qui fait foi, pas le chemin : `xseed-links` n'est pas exclu par motif, un lien devenu le seul nom restant est traité normalement.
+- Rapport : « Fichiers multi-noms : N (M partagés) · liens ignorés : L » après le scan ; espace des fichiers fragmentés compté une fois par inode (résumé d'éligibilité) ; compteur `[LIENS]` dans le résumé de session.
+- Tests : fichier et son lien → une seule mesure, une seule ligne CSV, une seule passe ; seul le lien subsiste → traité (unitaires et intégration XFS/EXT4).
+
+### Corrigé
+- Test unitaire SIGTERM instable (l'outil n'avait pas toujours eu le temps de mourir).
+
+`--sante` inchangé (lecture SMART seule).
+
 ## 4.0.0 — 2026-10-29
 
 Audit de la 3.1.0. Version majeure : en root, des installations jusque-là
