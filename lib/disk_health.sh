@@ -226,7 +226,7 @@ run_health_check() {
 # au-dessus de son seuil (Raw_Read_Error_Rate fluctue) : le disque, lui, reste suspect.
 _health_past_failure() {
     [[ -f "$1" ]] && _health_path_safe "$1" || return 0
-    awk -F '\t' 'NR > 1 && $2 != "PASSED" && $2 != "NA" && $2 != "" { print $1 "\t" $2; exit }' "$1"
+    awk -F '\t' 'NR > 1 && $1 ~ /^[0-9][0-9T:-]+$/ && $2 ~ /^[A-Za-z]+$/ && $2 != "PASSED" && $2 != "NA" && $2 != "" { print $1 "\t" $2; exit }' "$1"
 }
 
 # Raison d'un refus de défragmenter (vide : rien de bloquant).
