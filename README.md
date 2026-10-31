@@ -5,7 +5,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Bash](https://img.shields.io/badge/bash-%23121011.svg?style=flat&logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
 [![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi-red)](https://www.raspberrypi.org/)
-[![Version](https://img.shields.io/badge/version-4.0.1-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.1.0-green.svg)](CHANGELOG.md)
 
 ## 📖 Description
 
@@ -14,12 +14,13 @@
 ### 🎬 Cas d'usage
 
 - **BitTorrent / Syncthing** : fichiers écrits par morceaux, donc très fragmentés
+- **Liens physiques (cross-seed, `xseed-links/<tracker>/`)** : un même fichier sous plusieurs noms n'est lu et défragmenté qu'une fois
 - **Saccades de lecture** vidéo dues à la fragmentation
 - **Disques durs pleins** : accès plus réguliers, moins de déplacements de têtes
 
 ### ✨ Fonctionnalités
 
-- 🔍 **Scan rapide** XFS et EXT4 (`filefrag` par lots) → rapport CSV trié
+- 🔍 **Scan rapide** XFS et EXT4 (`filefrag` par lots) → rapport CSV trié, **une mesure par inode** : un fichier à plusieurs noms (liens physiques) n'est mesuré, compté et défragmenté qu'une fois, sous le premier nom rencontré ; les autres noms sont journalisés et comptés
 - 🧠 **Filtre intelligent** : ignore les fichiers dont l'extent moyen dépasse 4 Go (déjà fluides)
 - 🛡️ **Sécurités** : refus du FS racine (disque USB débranché, bind mount compris), des SSD et des disques de type indéterminé, des montages en lecture seule ; verrou anti-double exécution ; en root, refus du code et des dossiers modifiables par un autre compte
 - ⏱️ **Fichiers en cours d'écriture ignorés** (modifiés depuis moins d'1 h : téléchargements, synchro)
@@ -158,7 +159,7 @@ SMART_BAD_SECTOR_THRESHOLD=20
 | `INTEL_THRESHOLD_MO` | `4096` | Extent moyen au-delà duquel le fichier est ignoré |
 | `DEFAULT_TOP_LIMIT` / `DEFAULT_MIN_EXTENTS` | `10` / `2` | Mode auto |
 | `MIN_FILE_AGE_MIN` | `60` | Ignore les fichiers modifiés récemment |
-| `SCAN_EXCLUDES` | `*.tmp *.part *.parts *.!qB .syncthing.* *.crdownload` | Motifs exclus |
+| `SCAN_EXCLUDES` | `*.tmp *.part *.parts *.!qB .syncthing.* *.crdownload` | Motifs exclus (inutile d'y mettre `xseed-links` : c'est l'inode qui fait foi, un lien devenu le seul nom restant est traité normalement) |
 | `REPORT_DIR` / `REPORT_MAX_AGE_DAYS` | `<dossier d'AcmeFrag>/reports` / `30` | Rapports CSV, journaux et historique santé (chemin absolu) |
 | `QOS_ENABLE` / `QOS_NICE` / `QOS_IO_CLASS` | `true` / `19` / `3` (idle) | Bridage |
 | `MONITOR_ENABLE` / `MONITOR_INTERVAL_SEC` | `true` / `30` | Surveillance |
@@ -180,6 +181,13 @@ Priorité : options CLI > `local.conf` > `/etc/acmefrag.conf` (autre chemin : `A
 ```
 Octets	Extents	Taille	Chemin
 2899102105	731	2.7G	/mnt/HDD/Films/Mon.Film.2017.mkv
+```
+
+Une ligne par **inode** : un fichier à plusieurs noms (liens physiques, par exemple `xseed-links/<tracker>/…` créés par cross-seed) n'y figure qu'une fois, sous le premier nom rencontré. L'espace des fichiers fragmentés est donc compté une fois par fichier, pas par nom. Le scan journalise chaque nom ignoré (`🔗 <nom> : déjà traité via <premier nom>`) et résume (« multi-noms » : fichiers ayant plusieurs noms sur le disque, pas forcément tous dans la cible) :
+
+```
+   ✅ Scan terminé : 42 fichier(s) fragmenté(s) sur 1870 analysé(s)
+      Fichiers multi-noms : 12 (38.5G partagés) · liens ignorés : 15
 ```
 
 Le journal complet de chaque session est dans `reports/acmefrag_AAAA-MM-JJ.log`.
@@ -220,6 +228,7 @@ sudo make it       # tests d'intégration (images loop, aucun disque réel touch
 - **« Défragmentation refusée : bilan SMART FAILED »** (ou « … enregistré le … ») : le disque annonce sa fin, même s'il affiche PASSED aujourd'hui ; sauvegardez-le plutôt que de le réorganiser. `acmefrag <cible> --sante` montre l'évolution, `--force-sante` passe outre.
 - **Beaucoup d'« Espace libre insuffisant »** : libérez de la place ou lancez la défragmentation globale (menu 7, XFS).
 - **Rien n'est traité** : les fichiers sont peut-être déjà assez contigus (colonne `TRAITABLE`), essayez `-s 0`.
+- **Un fichier manque au classement alors qu'il est fragmenté** : il a peut-être un autre nom (lien physique) déjà mesuré — cherchez `déjà traité via` dans le journal.
 
 ---
 

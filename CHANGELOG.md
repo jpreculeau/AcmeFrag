@@ -1,10 +1,20 @@
 # Changelog
 
+## 4.1.0 — 2026-10-31
+
+### Ajouté
+- **Liens physiques** (cross-seed : `xseed-links/<tracker>/…`) : un fichier à plusieurs noms n'est plus lu, mesuré ni défragmenté une fois par nom. Le scan dédoublonne par inode (`st_dev:st_ino`) pendant le parcours : un seul nom par inode, le premier rencontré, est passé à `filefrag` et au filtre « assez contigu » ; les autres sont journalisés (`🔗 <nom> : déjà traité via <premier nom>`). C'est l'inode qui fait foi, pas le chemin : `xseed-links` n'est pas exclu par motif, un lien devenu le seul nom restant est traité normalement.
+- Rapport : « Fichiers multi-noms : N (M partagés) · liens ignorés : L » après le scan ; espace des fichiers fragmentés compté une fois par inode (résumé d'éligibilité) ; compteur `[LIENS]` dans le résumé de session.
+- Tests : fichier et son lien → une seule mesure, une seule ligne CSV, une seule passe ; seul le lien subsiste → traité (unitaires et intégration XFS/EXT4).
+
+`--sante` inchangé (lecture SMART seule).
+
 ## 4.0.1 — 2026-10-31
 
 ### Corrigé
 - **Garde-fou santé trop permissif** : un disque enregistré FAILED par `--sante`, puis redevenu PASSED parce que l'attribut fautif (Raw_Read_Error_Rate) avait remonté au-dessus de son seuil, était déclaré « aucune dégradation bloquante » malgré 152 secteurs réalloués. Le garde-fou refuse désormais aussi un disque dont l'historique `--sante` contient un bilan autre que PASSED (à n'importe quelle date), et un disque dont les secteurs réalloués atteignent `SMART_BAD_SECTOR_THRESHOLD` (50, le seuil déjà utilisé par la surveillance ; `0` désactive ce critère). `--force-sante` passe toujours outre ; en `--dry-run`, simple avertissement.
 - Le ✅ du garde-fou affiche les valeurs lues (bilan, réalloués, en attente, erreurs ATA), et non plus seulement un verdict.
+- Test unitaire SIGTERM instable (l'outil n'avait pas toujours eu le temps de mourir).
 
 ## 4.0.0 — 2026-10-29
 

@@ -58,21 +58,36 @@ test_fs() {
     make_fragmented "$MNT/films/vieux A.mkv" "$MNT/films/vieux: B.mkv"
     touch -d '2 days ago' "$MNT/films/vieux A.mkv" "$MNT/films/vieux: B.mkv"
     make_fragmented "$MNT/films/recent.mkv" "$MNT/films/recent2.mkv"
-    local a0 b0 r0
+    # Liens physiques (cross-seed) : « vieux A » a un second nom ; « orphelin » n'existe
+    # plus que par son lien sous xseed-links (l'original a été supprimé)
+    mkdir -p "$MNT/films/xseed-links/tracker"
+    ln "$MNT/films/vieux A.mkv" "$MNT/films/xseed-links/tracker/vieux A.mkv"
+    make_fragmented "$MNT/films/orphelin.mkv" "$MNT/films/recent3.mkv"
+    touch -d '2 days ago' "$MNT/films/orphelin.mkv"
+    ln "$MNT/films/orphelin.mkv" "$MNT/films/xseed-links/tracker/orphelin.mkv"; rm "$MNT/films/orphelin.mkv"
+    local a0 b0 r0 o0
     a0=$(extents "$MNT/films/vieux A.mkv"); b0=$(extents "$MNT/films/vieux: B.mkv")
-    r0=$(extents "$MNT/films/recent.mkv")
-    check "$fs : fichiers de test fragmentés ($a0/$b0/$r0 extents)" test "$a0" -gt 2 -a "$b0" -gt 2 -a "$r0" -gt 2
+    r0=$(extents "$MNT/films/recent.mkv"); o0=$(extents "$MNT/films/xseed-links/tracker/orphelin.mkv")
+    check "$fs : fichiers de test fragmentés ($a0/$b0/$r0/$o0 extents)" test "$a0" -gt 2 -a "$b0" -gt 2 -a "$r0" -gt 2 -a "$o0" -gt 2
 
     rc=0; run_acme "$MNT" --dry-run --no-monitor --force-ssd || rc=$?
     check "$fs : dry-run hors TTY -> code 0" test "$rc" -eq 0
     check "$fs : dry-run en mode auto" grep -q "MODE AUTOMATIQUE" "$WORK/out.log"
     check "$fs : dry-run ne modifie rien" test "$(extents "$MNT/films/vieux A.mkv")" -eq "$a0"
-    check "$fs : CSV produit" test -s "$WORK/reports/fragmentation_$(date +%Y-%m-%d).csv"
+    local csv; csv="$WORK/reports/fragmentation_$(date +%Y-%m-%d).csv"
+    check "$fs : CSV produit" test -s "$csv"
+    check "$fs : liens physiques : 'vieux A' une seule fois au CSV" test "$(grep -c 'vieux A.mkv' "$csv")" -eq 1
+    check "$fs : liens physiques : second nom journalisé « déjà traité via »" grep -q "vieux A.mkv : déjà traité via .*vieux A.mkv" "$WORK/out.log"
+    check "$fs : liens physiques : bilan multi-noms" grep -q "Fichiers multi-noms : 1 (.* partagés) · liens ignorés : 1" "$WORK/out.log"
+    check "$fs : liens physiques : lien seul restant au CSV" grep -q 'xseed-links/tracker/orphelin.mkv' "$csv"
 
     rc=0; run_acme "$MNT/films" -s 0 --no-monitor --force-ssd || rc=$?
     check "$fs : défragmentation réelle -> code 0" test "$rc" -eq 0
     check "$fs : 'vieux A' défragmenté ($a0 -> $(extents "$MNT/films/vieux A.mkv"))" test "$(extents "$MNT/films/vieux A.mkv")" -lt "$a0"
+    check "$fs : 'vieux A' traité une seule fois (deux noms)" test "$(grep -c '^⏳.*vieux A.mkv' "$WORK/out.log")" -eq 1
     check "$fs : nom avec ': ' traité ($b0 -> $(extents "$MNT/films/vieux: B.mkv"))" test "$(extents "$MNT/films/vieux: B.mkv")" -lt "$b0"
+    check "$fs : lien seul restant défragmenté ($o0 -> $(extents "$MNT/films/xseed-links/tracker/orphelin.mkv"))" \
+        test "$(extents "$MNT/films/xseed-links/tracker/orphelin.mkv")" -lt "$o0"
     check "$fs : fichier récent protégé" test "$(extents "$MNT/films/recent.mkv")" -eq "$r0"
     check "$fs : journal écrit" test -s "$WORK/reports/acmefrag_$(date +%Y-%m-%d).log"
 

@@ -26,12 +26,14 @@ display_top() {
     printf '%s\n' "${RULE//=/-}"
 }
 
-# Résumé d'éligibilité : évite la surprise de « 60 ignorés » après traitement
+# Résumé d'éligibilité : évite la surprise de « 60 ignorés » après traitement.
+# Une ligne du CSV = un inode : l'espace est compté une fois par fichier, quel
+# que soit son nombre de noms (liens physiques).
 display_eligibility_summary() {
-    local csv="$1" bytes extents _h _p total=0 eligible=0
+    local csv="$1" bytes extents _h _p total=0 eligible=0 space=0
     while IFS=$'\t' read -r bytes extents _h _p; do
         [[ "$extents" == Extents ]] && continue        # en-tête
-        total=$((total + 1))
+        total=$((total + 1)); space=$((space + bytes))
         is_eligible "$bytes" "$extents" && eligible=$((eligible + 1))
     done < "$csv"
     log ""
@@ -41,6 +43,7 @@ display_eligibility_summary() {
         log "   Fichiers éligibles : $eligible / $total (seuil ${INTEL_THRESHOLD_MO} Mo/extent)"
         (( total > eligible )) && log "   Les $((total - eligible)) autres sont déjà assez contigus pour une lecture fluide."
     fi
+    (( total > 0 )) && log "   Espace des fichiers fragmentés : $(human_size "$space") (compté une fois par inode)"
     return 0
 }
 
@@ -94,6 +97,7 @@ display_session_summary() {
     log "   [DÉJÀ-OK]  Sans gain possible    : $STAT_ALREADY"
     log "   [IGNORÉ]   Filtre / récent / etc. : $STAT_SKIPPED"
     log "   [ÉCHEC]    Échecs                : $STAT_FAILED"
+    log "   [LIENS]    Noms ignorés (inode)  : $SCAN_LINKS_SKIPPED"
     is_true "$DRY_RUN" && log "   [SIMULÉ]   Dry-run               : $STAT_SIMULATED"
     return 0
 }
