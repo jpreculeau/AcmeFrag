@@ -5,7 +5,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Bash](https://img.shields.io/badge/bash-%23121011.svg?style=flat&logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
 [![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi-red)](https://www.raspberrypi.org/)
-[![Version](https://img.shields.io/badge/version-4.0.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-4.0.1-green.svg)](CHANGELOG.md)
 
 ## 📖 Description
 
@@ -123,7 +123,7 @@ Un disque sans numéro de série lisible est mesuré sans historique (pas de com
 
 La dernière ligne, `BILAN SANTÉ : …`, résume le résultat pour un orchestrateur. Aucun verrou : `--sante` peut tourner pendant une défragmentation.
 
-**Garde-fou** : avant toute défragmentation, AcmeFrag refuse (code `3`) un disque au bilan autre que PASSED, avec des secteurs en attente (197), ou dont les secteurs réalloués (5) ont augmenté depuis la plus ancienne mesure `--sante` des `SMART_GUARD_DAYS` derniers jours (30) : des écritures massives sur un disque mourant accélèrent sa fin. Le garde-fou lit l'historique sans l'écrire ; la fenêtre évite qu'un `--sante` quotidien, qui enregistre la hausse, ne la fasse oublier avant la défragmentation suivante. `--force-sante` passe outre ; en `--dry-run`, simple avertissement, et le contrôle est rejoué si l'on quitte le dry-run depuis le menu (touche `d`). Si SMART est illisible (smartmontools absent, pont USB muet), le garde-fou avertit et laisse passer.
+**Garde-fou** : avant toute défragmentation, AcmeFrag refuse (code `3`) un disque au bilan autre que PASSED — aujourd'hui **ou à une mesure `--sante` passée** (un FAILED dû à un attribut qui fluctue, comme Raw_Read_Error_Rate, peut redevenir PASSED : le disque reste suspect) —, avec des secteurs en attente (197), dont les secteurs réalloués (5) atteignent `SMART_BAD_SECTOR_THRESHOLD` (50, le seuil de la surveillance), ou ont augmenté depuis la plus ancienne mesure `--sante` des `SMART_GUARD_DAYS` derniers jours (30) : des écritures massives sur un disque mourant accélèrent sa fin. Le garde-fou lit l'historique sans l'écrire ; la fenêtre évite qu'un `--sante` quotidien, qui enregistre la hausse, ne la fasse oublier avant la défragmentation suivante. `--force-sante` passe outre ; en `--dry-run`, simple avertissement, et le contrôle est rejoué si l'on quitte le dry-run depuis le menu (touche `d`). Si SMART est illisible (smartmontools absent, pont USB muet), le garde-fou avertit et laisse passer.
 
 ### Automatiser avec cron
 
@@ -162,7 +162,7 @@ SMART_BAD_SECTOR_THRESHOLD=20
 | `REPORT_DIR` / `REPORT_MAX_AGE_DAYS` | `<dossier d'AcmeFrag>/reports` / `30` | Rapports CSV, journaux et historique santé (chemin absolu) |
 | `QOS_ENABLE` / `QOS_NICE` / `QOS_IO_CLASS` | `true` / `19` / `3` (idle) | Bridage |
 | `MONITOR_ENABLE` / `MONITOR_INTERVAL_SEC` | `true` / `30` | Surveillance |
-| `SMART_BAD_SECTOR_THRESHOLD` / `..._DRIFT_THRESHOLD` | `50` / `5` | Secteurs réalloués (absolu / dérive) |
+| `SMART_BAD_SECTOR_THRESHOLD` / `..._DRIFT_THRESHOLD` | `50` / `5` | Secteurs réalloués (absolu / dérive) : surveillance, et refus de défragmenter au-delà du seuil absolu (`0` = critère désactivé) |
 | `DISK_TEMP_THRESHOLD_C` / `SYSTEM_TEMP_THRESHOLD_C` | `60` / `85` | Températures critiques |
 | `AUTO_STOP_ON_ALERT` | `true` | Arrêt automatique sur alerte |
 | `SMART_TEMP_ALERT_C` | `55` | `--sante` : alerte si la température du disque dépasse ce seuil (°C) |
@@ -217,7 +217,7 @@ sudo make it       # tests d'intégration (images loop, aucun disque réel touch
 - **« Type de disque indéterminé »** : le noyau ne dit pas si le disque est rotatif (`lsblk -o NAME,ROTA`). `--force-ssd` si vous êtes sûr qu'il s'agit d'un disque dur.
 - **« Refus : … est modifiable par un autre compte »** : voir [Sécurité](#-sécurité) ; `stat -c '%U %G %a' <chemin>` sur le fichier et ses dossiers parents.
 - **« SMART indisponible »** : installez `smartmontools` ; certains ponts USB ne relaient pas SMART.
-- **« Défragmentation refusée : bilan SMART FAILED »** : le disque annonce sa fin ; sauvegardez-le plutôt que de le réorganiser. `acmefrag <cible> --sante` montre l'évolution, `--force-sante` passe outre.
+- **« Défragmentation refusée : bilan SMART FAILED »** (ou « … enregistré le … ») : le disque annonce sa fin, même s'il affiche PASSED aujourd'hui ; sauvegardez-le plutôt que de le réorganiser. `acmefrag <cible> --sante` montre l'évolution, `--force-sante` passe outre.
 - **Beaucoup d'« Espace libre insuffisant »** : libérez de la place ou lancez la défragmentation globale (menu 7, XFS).
 - **Rien n'est traité** : les fichiers sont peut-être déjà assez contigus (colonne `TRAITABLE`), essayez `-s 0`.
 

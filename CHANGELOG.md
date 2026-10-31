@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.0.1 — 2026-10-31
+
+### Corrigé
+- **Garde-fou santé trop permissif** : un disque enregistré FAILED par `--sante`, puis redevenu PASSED parce que l'attribut fautif (Raw_Read_Error_Rate) avait remonté au-dessus de son seuil, était déclaré « aucune dégradation bloquante » malgré 152 secteurs réalloués. Le garde-fou refuse désormais aussi un disque dont l'historique `--sante` contient un bilan autre que PASSED (à n'importe quelle date), et un disque dont les secteurs réalloués atteignent `SMART_BAD_SECTOR_THRESHOLD` (50, le seuil déjà utilisé par la surveillance ; `0` désactive ce critère). `--force-sante` passe toujours outre ; en `--dry-run`, simple avertissement.
+- Le ✅ du garde-fou affiche les valeurs lues (bilan, réalloués, en attente, erreurs ATA), et non plus seulement un verdict.
+
 ## 4.0.0 — 2026-10-29
 
 Audit de la 3.1.0. Version majeure : en root, des installations jusque-là

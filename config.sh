@@ -75,9 +75,11 @@ fi
 # Lecture SMART passive (aucun auto-test). Historique : REPORT_DIR/sante/<n° de série>.tsv
 # Alerte si : bilan différent de PASSED (au changement), hausse des attributs 5, 196,
 # 197, 198, 199 ou des erreurs ATA, température au-dessus du seuil ci-dessous.
-# La défragmentation est refusée si le bilan est autre que PASSED, si des secteurs sont en
-# attente (197) ou si les réalloués (5) ont augmenté sur SMART_GUARD_DAYS jours
-# (par rapport à la plus ancienne mesure de cette période).
+# La défragmentation est refusée si le bilan est autre que PASSED (aujourd'hui, ou à une
+# mesure --sante passée : un FAILED redevenu PASSED reste suspect), si des secteurs sont en
+# attente (197), si les réalloués (5) atteignent SMART_BAD_SECTOR_THRESHOLD (0 = critère
+# désactivé) ou ont augmenté sur SMART_GUARD_DAYS jours (par rapport à la plus ancienne
+# mesure de cette période).
 : "${SMART_TEMP_ALERT_C:=55}"          # alerte si la température dépasse strictement ce seuil (°C)
 : "${SMART_GUARD_DAYS:=30}"            # période du garde-fou « réalloués en hausse » (jours)
 
