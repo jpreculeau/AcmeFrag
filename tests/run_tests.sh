@@ -471,6 +471,35 @@ PATH="$DF/bin:$PATH" scan_filesystem "$DF/scan" "$DF/t.csv" > "$DF/scan.out" 2>&
 check "liens : nom à tabulation écarté, nom propre du même inode mesuré" eq "$(cat "$DF/filefrag.args")" "$DF/scan/xseed/propre.mkv"
 check "liens : nom propre au CSV" grep -q 'xseed/propre.mkv' "$DF/t.csv"
 check "liens : nom à tabulation jamais « premier nom »" not grep -q 'déjà traité via' "$DF/scan.out"
+# Idem pour un nom à retour à la ligne
+rm -rf "$DF/scan"; mkdir -p "$DF/scan/xseed"
+printf 'x' > "$DF/scan/a"$'\n'"b.mkv"; ln "$DF/scan/a"$'\n'"b.mkv" "$DF/scan/xseed/propre.mkv"
+: > "$DF/filefrag.args"
+PATH="$DF/bin:$PATH" scan_filesystem "$DF/scan" "$DF/t.csv" > "$DF/scan.out" 2>&1
+check "liens : nom à retour à la ligne écarté, nom propre mesuré" eq "$(cat "$DF/filefrag.args")" "$DF/scan/xseed/propre.mkv"
+check "liens : nom à retour à la ligne jamais « premier nom »" not grep -q 'déjà traité via' "$DF/scan.out"
+# Journal des liens sans caractère de contrôle, C0 (ESC) comme C1 en UTF-8 (CSI 8 bits) :
+# les deux noms sont hostiles, l'ordre de parcours de find importe peu
+rm -rf "$DF/scan"; mkdir -p "$DF/scan"
+printf 'x' > "$DF/scan/e"$'\e'"[31m.mkv"; ln "$DF/scan/e"$'\e'"[31m.mkv" "$DF/scan/c"$'\xc2\x9b'"1m.mkv"
+PATH="$DF/bin:$PATH" scan_filesystem "$DF/scan" "$DF/t.csv" > "$DF/scan.out" 2>&1
+check "liens : nom ignoré journalisé" grep -q '🔗 .* : déjà traité via ' "$DF/scan.out"
+check "liens : journal sans ESC ni CSI 8 bits" not grep -q $'\e\|\xc2\x9b' <<< "$(grep '🔗' "$DF/scan.out")"
+check "liens : caractères de contrôle remplacés par « ? »" grep -q '🔗 .*e?\[31m.mkv' "$DF/scan.out"
+check "liens : C1 remplacé par « ? »" grep -q '🔗 .*c?1m\.mkv' "$DF/scan.out"
+# Lien créé pendant le scan (cross-seed actif) : nlink passe de 2 à 3 entre deux noms.
+# L'inode ne doit pas être oublié trop tôt, ni son troisième nom re-mesuré.
+: > "$DF/race.links"; : > "$DF/race.stats"
+printf '1:5 2 10 /t/x\0001:5 3 10 /t/y\0001:5 3 10 /t/z\000' \
+    | _dedupe_inodes "$DF/race.links" "$DF/race.stats" | tr '\0' '\n' > "$DF/race.out"
+check "liens : nlink qui augmente pendant le scan -> un seul nom mesuré" eq "$(cat "$DF/race.out")" "/t/x"
+check "liens : nlink qui augmente -> un seul inode multi-noms" eq "$(scan_stat multi "$DF/race.stats")" 1
+# Lien ajouté après que les deux noms connus ont été vus : l'inode n'est pas oublié
+: > "$DF/race.stats"
+printf '1:5 2 10 /t/x\0001:5 2 10 /t/y\0001:5 3 10 /t/z\000' \
+    | _dedupe_inodes "$DF/race.links" "$DF/race.stats" | tr '\0' '\n' > "$DF/race.out"
+check "liens : lien ajouté après tous les noms connus -> pas de re-mesure" eq "$(cat "$DF/race.out")" "/t/x"
+check "liens : lien ajouté après -> espace partagé compté une fois" eq "$(scan_stat shared "$DF/race.stats")" 10
 INTEL_THRESHOLD_MO=4096
 rm -rf "$DF"; MIN_FILE_AGE_MIN=60 DRY_RUN=false
 
