@@ -442,6 +442,8 @@ acme=$!
 for _ in 1 2 3 4 5 6 7 8 9 10; do [[ -s "$SV/pid" ]] && break; sleep 0.5; done
 kill -TERM "$acme"; wait "$acme"; rc_term=$?
 check "SIGTERM : code 143" eq "$rc_term" 143
+# L'outil reçoit SIGTERM juste avant la sortie du script : lui laisser l'instant de mourir
+for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$(cat "$SV/pid")" 2>/dev/null || break; sleep 0.2; done
 check "SIGTERM : outil en cours arrêté" not kill -0 "$(cat "$SV/pid")" 2>/dev/null
 rm -rf "$SV"; MONITOR_DIR="" STOPPED_BY_MONITOR=false
 
