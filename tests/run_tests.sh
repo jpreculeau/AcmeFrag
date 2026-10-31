@@ -410,6 +410,41 @@ check "scan : aucun appel à numfmt" eq "$(wc -l < "$DF/numfmt.n")" 0
 mkdir -p "$DF/a\\b"; printf 'x' > "$DF/a\\b/f.mkv"
 PATH="$DF/bin:$PATH" scan_filesystem "$DF/a\\b" "$DF/h.csv" > /dev/null 2>&1
 check "scan : cible contenant « \\ » analysée" grep -q 'f.mkv' "$DF/h.csv"
+# Liens physiques (cross-seed) : un inode = une mesure, un seul nom au CSV, espace
+# compté une fois ; le dossier xseed-links n'est pas exclu par motif : un lien
+# devenu le seul nom restant est traité comme n'importe quel fichier.
+rm -rf "$DF/scan"; mkdir -p "$DF/scan/xseed-links/tracker"
+head -c 4096 /dev/zero > "$DF/scan/film.mkv"
+ln "$DF/scan/film.mkv" "$DF/scan/xseed-links/tracker/film.mkv"
+ln "$DF/scan/film.mkv" "$DF/scan/film (copie).mkv"
+head -c 2048 /dev/zero > "$DF/scan/orig.mkv"; ln "$DF/scan/orig.mkv" "$DF/scan/xseed-links/tracker/orig.mkv"
+rm "$DF/scan/orig.mkv"
+# Faux filefrag (5 extents partout) qui note les noms reçus
+# shellcheck disable=SC2016  # $f est développé par le faux filefrag
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" >> %q\nfor f; do printf "%%s: 5 extents found\\n" "$f"; done\n' "$DF/filefrag.args" > "$DF/bin/filefrag"
+: > "$DF/filefrag.args"
+INTEL_THRESHOLD_MO=0
+PATH="$DF/bin:$PATH" scan_filesystem "$DF/scan" "$DF/l.csv" > "$DF/scan.out" 2>&1
+check "liens : un nom par inode passé à filefrag (2 inodes, 4 noms)" eq "$(sort "$DF/filefrag.args" | uniq | wc -l)" 2
+check "liens : chaque nom mesuré une seule fois" eq "$(sort "$DF/filefrag.args" | uniq -d | wc -l)" 0
+check "liens : film.mkv mesuré sous un seul nom" eq "$(grep -c 'film' "$DF/filefrag.args")" 1
+check "liens : les 2 noms ignorés journalisés" eq "$(grep -c '🔗 .* : déjà traité via ' "$DF/scan.out")" 2
+check "liens : journalisés avec le nom mesuré (ordre de parcours libre)" \
+    eq "$(sed -n 's/.* : déjà traité via //p' "$DF/scan.out" | sort -u)" "$(grep film "$DF/filefrag.args")"
+check "liens : 2 inodes analysés" grep -q "sur 2 analysé(s)" "$DF/scan.out"
+check "liens : bilan multi-noms et liens ignorés" grep -q "Fichiers multi-noms : 1 (4.0K partagés) · liens ignorés : 2" "$DF/scan.out"
+check "liens : compteurs de session" eq "$SCAN_MULTI/$SCAN_SHARED_BYTES/$SCAN_LINKS_SKIPPED" "1/4096/2"
+check "liens : lien seul restant (xseed-links) traité normalement" eq "$(grep -c 'xseed-links/tracker/orig.mkv' "$DF/filefrag.args")" 1
+check "liens : xseed-links non exclu du scan" grep -q 'orig.mkv' "$DF/filefrag.args"
+check "liens : une seule ligne CSV par inode" eq "$(csv_count "$DF/l.csv")" 2
+check "liens : espace des fichiers fragmentés compté une fois par inode" \
+    grep -q "Espace des fichiers fragmentés : 6.0K" <<< "$(display_eligibility_summary "$DF/l.csv")"
+check "liens : résumé de session avec les noms ignorés" grep -q "Noms ignorés (inode)  : 2" <<< "$(display_session_summary)"
+STAT_SIMULATED=0 DRY_RUN=true
+touch -d '2 days ago' "$DF/scan/film.mkv" "$DF/scan/xseed-links/tracker/orig.mkv"
+process_csv_rows 0 2 "$DF/l.csv" "$DF/scan" > /dev/null 2>&1
+check "liens : une seule passe de défragmentation par inode" eq "$STAT_SIMULATED" 2
+INTEL_THRESHOLD_MO=4096
 rm -rf "$DF"; MIN_FILE_AGE_MIN=60 DRY_RUN=false
 
 echo "surveillance : arrêt d'un outil en cours"
