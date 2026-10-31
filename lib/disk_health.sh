@@ -221,8 +221,17 @@ run_health_check() {
     log "BILAN SANTÉ : aucune nouvelle dégradation (bilan ${state%%$'\t'*})"
 }
 
+# Premier bilan autre que PASSED de l'historique $1, "date<TAB>bilan" (vide si
+# aucun). Un bilan FAILED peut redevenir PASSED quand l'attribut fautif remonte
+# au-dessus de son seuil (Raw_Read_Error_Rate fluctue) : le disque, lui, reste suspect.
+_health_past_failure() {
+    [[ -f "$1" ]] && _health_path_safe "$1" || return 0
+    awk -F '\t' 'NR > 1 && $1 ~ /^[0-9][0-9T:-]+$/ && $2 ~ /^[A-Za-z]+$/ && $2 != "PASSED" && $2 != "NA" && $2 != "" { print $1 "\t" $2; exit }' "$1"
+}
+
 # Raison d'un refus de défragmenter (vide : rien de bloquant).
-# $1 = état de référence (vide si aucun), $2 = état actuel.
+# $1 = état de référence (vide si aucun), $2 = état actuel,
+# $3 = premier bilan non PASSED de l'historique ("date<TAB>bilan", vide si aucun).
 _health_refusal() {
     local -a p=() c=() r=()
     local re pe
@@ -230,8 +239,15 @@ _health_refusal() {
     IFS=$'\t' read -ra c <<< "$2"
     [[ -n "$1" ]] && IFS=$'\t' read -ra p <<< "$1"
     # Tout bilan autre que PASSED (FAILED, « IMPENDING FAILURE » en SAS…) bloque
-    [[ "${c[0]}" != PASSED && "${c[0]}" != NA ]] && r+=("bilan SMART ${c[0]}")
+    if [[ "${c[0]}" != PASSED && "${c[0]}" != NA ]]; then
+        r+=("bilan SMART ${c[0]}")
+    elif [[ -n "${3:-}" ]]; then                      # bilan redevenu PASSED : non fiable
+        r+=("bilan SMART ${3#*$'\t'} enregistré le ${3%%T*}")
+    fi
     is_uint "${c[$pe]:-}" && (( 10#${c[$pe]} > 0 )) && r+=("${c[$pe]} secteur(s) en attente")
+    # Même seuil absolu que la surveillance (SMART_BAD_SECTOR_THRESHOLD)
+    is_uint "${c[$re]:-}" && (( SMART_BAD_SECTOR_THRESHOLD > 0 && 10#${c[$re]} >= SMART_BAD_SECTOR_THRESHOLD )) \
+        && r+=("${c[$re]} secteurs réalloués (seuil ${SMART_BAD_SECTOR_THRESHOLD})")
     is_uint "${p[$re]:-}" && is_uint "${c[$re]:-}" && (( 10#${c[$re]} > 10#${p[$re]} )) \
         && r+=("secteurs réalloués ${p[$re]} → ${c[$re]} (${SMART_GUARD_DAYS} derniers jours)")
     (( ${#r[@]} > 0 )) || return 0
@@ -255,12 +271,18 @@ check_disk_health() {
         warn "Santé SMART de $dev non vérifiable : poursuite"
         return 0
     fi
-    local serial="${rec%%$'\t'*}" ref=""
+    local serial="${rec%%$'\t'*}" ref="" past="" file
+    local -a c=()
     # Sans numéro de série, pas d'historique propre à ce disque (comme --sante)
-    [[ "$serial" == NA ]] || ref=$(_health_baseline "$(_health_file "$serial")")
-    reason=$(_health_refusal "$ref" "${rec#*$'\t'}")
+    if [[ "$serial" != NA ]]; then
+        file=$(_health_file "$serial")
+        ref=$(_health_baseline "$file"); past=$(_health_past_failure "$file")
+    fi
+    reason=$(_health_refusal "$ref" "${rec#*$'\t'}" "$past")
+    IFS=$'\t' read -ra c <<< "${rec#*$'\t'}"
     if [[ -z "$reason" ]]; then
-        ok "Santé SMART de $dev : aucune dégradation bloquante"
+        # Les valeurs, pas seulement un verdict : un ✅ doit pouvoir être vérifié d'un coup d'œil
+        ok "Santé SMART de $dev : bilan ${c[0]}, réalloués ${c[$(_col 5)]:-NA}, en attente ${c[$(_col 197)]:-NA}, erreurs ATA ${c[$(_col ata)]:-NA} (sous les seuils)"
     elif is_true "$DRY_RUN"; then
         warn "Disque en mauvaise santé ($reason) : simulation seulement, poursuite"
     elif is_true "$FORCE_HEALTH"; then

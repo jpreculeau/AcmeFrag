@@ -151,7 +151,8 @@ SÉCURITÉS
     Refus si : cible sur le FS racine (bind mount compris), FS non XFS/EXT4,
     montage en lecture seule, SSD ou type de disque indéterminé (sauf
     --force-ssd), autre instance en cours, disque en mauvaise santé : bilan
-    SMART autre que PASSED, secteurs en attente, réalloués en hausse sur
+    SMART autre que PASSED (ou déjà enregistré par --sante), secteurs en
+    attente, réalloués au-delà de SMART_BAD_SECTOR_THRESHOLD ou en hausse sur
     SMART_GUARD_DAYS jours d'historique --sante (sauf --force-sante ;
     avertissement seul en --dry-run). En root : refus du code, de la
     configuration ou du dossier de rapports qui n'appartiennent pas à un compte
