@@ -183,7 +183,7 @@ Octets	Extents	Taille	Chemin
 2899102105	731	2.7G	/mnt/HDD/Films/Mon.Film.2017.mkv
 ```
 
-Une ligne par **inode** : un fichier à plusieurs noms (liens physiques, par exemple `xseed-links/<tracker>/…` créés par cross-seed) n'y figure qu'une fois, sous le premier nom rencontré. L'espace des fichiers fragmentés est donc compté une fois par fichier, pas par nom. Le scan journalise chaque nom ignoré (`🔗 <nom> : déjà traité via <premier nom>`) et résume :
+Une ligne par **inode** : un fichier à plusieurs noms (liens physiques, par exemple `xseed-links/<tracker>/…` créés par cross-seed) n'y figure qu'une fois, sous le premier nom rencontré. L'espace des fichiers fragmentés est donc compté une fois par fichier, pas par nom. Le scan journalise chaque nom ignoré (`🔗 <nom> : déjà traité via <premier nom>`) et résume (« multi-noms » : fichiers ayant plusieurs noms sur le disque, pas forcément tous dans la cible) :
 
 ```
    ✅ Scan terminé : 42 fichier(s) fragmenté(s) sur 1870 analysé(s)

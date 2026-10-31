@@ -24,16 +24,20 @@ _find_exclude_args() {
 
 # Un inode, une seule mesure. Un fichier à plusieurs noms (liens physiques :
 # cross-seed, hardlinks de sauvegarde) n'est lu qu'une fois, sous le premier
-# nom rencontré ; les autres noms sont notés dans $2 ("nom<TAB>premier nom").
+# nom rencontré ; les autres noms sont notés dans $1 ("nom<TAB>premier nom").
 # C'est l'inode qui fait foi, pas le chemin : un lien devenu le seul nom restant
-# est un fichier comme un autre. Statistiques ajoutées à $3 ("clé<TAB>valeur") :
+# est un fichier comme un autre. Statistiques ajoutées à $2 ("clé<TAB>valeur") :
 # multi (inodes à plusieurs noms), shared (leurs octets), links (noms ignorés).
-# Enregistrements terminés par NUL (un nom peut contenir un retour à la ligne),
-# chemin = tout ce qui suit les trois premiers champs (il peut contenir des espaces).
+# Enregistrements terminés par NUL, chemin = tout ce qui suit les trois premiers
+# champs (il peut contenir des espaces). Un nom à tabulation ou retour à la ligne
+# (non représentable au CSV, écarté par _scan_rows) est ignoré ici : il ne doit
+# pas devenir le « premier nom » d'un inode qui en a un valide. Locale C : octets
+# tels quels, pas d'avertissement gawk sur un nom non UTF-8.
 _dedupe_inodes() {
-    LINKS="$1" STATS="$2" awk -v RS='\0' -v ORS='\0' '
+    LINKS="$1" STATS="$2" LC_ALL=C awk -v RS='\0' -v ORS='\0' '
         {
             path = substr($0, length($1) + length($2) + length($3) + 4)
+            if (path ~ /[\t\n]/) next
             if ($2 > 1) {                                  # nlink > 1 seulement
                 if ($1 in first) {                     # noté sans caractère de contrôle (journal)
                     a = path; b = first[$1]; gsub(/[[:cntrl:]]/, "?", a); gsub(/[[:cntrl:]]/, "?", b)
@@ -83,12 +87,12 @@ _scan_rows() {
             ($2 in size) { print size[$2], $1, human(size[$2]), $2 }' - "$list"
 }
 
-# Bilan du dernier scan : inodes à plusieurs noms, leurs octets, noms ignorés
-SCAN_MULTI=0 SCAN_SHARED_BYTES=0 SCAN_LINKS_SKIPPED=0
+# Noms ignorés par le dernier scan (autres noms d'un inode déjà mesuré)
+SCAN_LINKS_SKIPPED=0
 
 # Scan complet -> CSV. $1 = cible, $2 = fichier CSV
 scan_filesystem() {
-    local target="$1" csv="$2" tmp stats links list total
+    local target="$1" csv="$2" tmp stats links list total multi shared
     title "🔍 Analyse de la fragmentation ($(fs_type "$target")) sur : $target"
     log "---   ⏳ Peut prendre plusieurs minutes selon le nombre de fichiers…"
 
@@ -103,14 +107,14 @@ scan_filesystem() {
     } > "$tmp"
     mv -f -- "$tmp" "$csv"      # écriture atomique : jamais de rapport à moitié écrit
 
-    SCAN_MULTI=$(scan_stat multi "$stats"); SCAN_SHARED_BYTES=$(scan_stat shared "$stats")
+    multi=$(scan_stat multi "$stats"); shared=$(scan_stat shared "$stats")
     SCAN_LINKS_SKIPPED=$(scan_stat links "$stats")
-    : "${SCAN_MULTI:=0}" "${SCAN_SHARED_BYTES:=0}" "${SCAN_LINKS_SKIPPED:=0}"
+    : "${multi:=0}" "${shared:=0}" "${SCAN_LINKS_SKIPPED:=0}"
     awk -F'\t' '{ printf "   🔗 %s : déjà traité via %s\n", $1, $2 }' "$links"
     total=$(scan_stat total "$stats")
     ok "Scan terminé : $(csv_count "$csv") fichier(s) fragmenté(s) sur ${total:-?} analysé(s)"
-    if (( SCAN_MULTI > 0 )); then
-        log "      Fichiers multi-noms : ${SCAN_MULTI} ($(human_size "$SCAN_SHARED_BYTES") partagés) · liens ignorés : ${SCAN_LINKS_SKIPPED}"
+    if (( multi > 0 )); then   # inodes à plusieurs noms sur le disque (pas forcément tous dans la cible)
+        log "      Fichiers multi-noms : ${multi} ($(human_size "$shared") partagés) · liens ignorés : ${SCAN_LINKS_SKIPPED}"
     fi
     log "      Rapport : $csv"
     rm -f -- "$stats" "$links" "$list"

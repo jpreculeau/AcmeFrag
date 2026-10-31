@@ -433,7 +433,7 @@ check "liens : journalisés avec le nom mesuré (ordre de parcours libre)" \
     eq "$(sed -n 's/.* : déjà traité via //p' "$DF/scan.out" | sort -u)" "$(grep film "$DF/filefrag.args")"
 check "liens : 2 inodes analysés" grep -q "sur 2 analysé(s)" "$DF/scan.out"
 check "liens : bilan multi-noms et liens ignorés" grep -q "Fichiers multi-noms : 1 (4.0K partagés) · liens ignorés : 2" "$DF/scan.out"
-check "liens : compteurs de session" eq "$SCAN_MULTI/$SCAN_SHARED_BYTES/$SCAN_LINKS_SKIPPED" "1/4096/2"
+check "liens : compteur de session" eq "$SCAN_LINKS_SKIPPED" 2
 check "liens : lien seul restant (xseed-links) traité normalement" eq "$(grep -c 'xseed-links/tracker/orig.mkv' "$DF/filefrag.args")" 1
 check "liens : xseed-links non exclu du scan" grep -q 'orig.mkv' "$DF/filefrag.args"
 check "liens : une seule ligne CSV par inode" eq "$(csv_count "$DF/l.csv")" 2
@@ -444,6 +444,15 @@ STAT_SIMULATED=0 DRY_RUN=true
 touch -d '2 days ago' "$DF/scan/film.mkv" "$DF/scan/xseed-links/tracker/orig.mkv"
 process_csv_rows 0 2 "$DF/l.csv" "$DF/scan" > /dev/null 2>&1
 check "liens : une seule passe de défragmentation par inode" eq "$STAT_SIMULATED" 2
+# Un nom à tabulation (non représentable au CSV) ne doit pas devenir le « premier nom » :
+# le nom propre du même inode doit être mesuré et figurer au CSV
+rm -rf "$DF/scan"; mkdir -p "$DF/scan/xseed"
+printf 'x' > "$DF/scan/a"$'\t'"b.mkv"; ln "$DF/scan/a"$'\t'"b.mkv" "$DF/scan/xseed/propre.mkv"
+: > "$DF/filefrag.args"
+PATH="$DF/bin:$PATH" scan_filesystem "$DF/scan" "$DF/t.csv" > "$DF/scan.out" 2>&1
+check "liens : nom à tabulation écarté, nom propre du même inode mesuré" eq "$(cat "$DF/filefrag.args")" "$DF/scan/xseed/propre.mkv"
+check "liens : nom propre au CSV" grep -q 'xseed/propre.mkv' "$DF/t.csv"
+check "liens : nom à tabulation jamais « premier nom »" not grep -q 'déjà traité via' "$DF/scan.out"
 INTEL_THRESHOLD_MO=4096
 rm -rf "$DF"; MIN_FILE_AGE_MIN=60 DRY_RUN=false
 
